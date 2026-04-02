@@ -21,6 +21,7 @@ internal sealed partial class ExecutionManagerCore<T> : IExecutionManager
     private readonly ExecutionManagerHelpers.RangeSectionMap _rangeSectionMapLookup;
     private readonly EEJitManager _eeJitManager;
     private readonly ReadyToRunJitManager _r2rJitManager;
+    private readonly InterpreterJitManager _interpreterJitManager;
 
     public ExecutionManagerCore(Target target, Data.RangeSectionMap topRangeSectionMap)
     {
@@ -30,6 +31,7 @@ internal sealed partial class ExecutionManagerCore<T> : IExecutionManager
         INibbleMap nibbleMap = T.Create(_target);
         _eeJitManager = new EEJitManager(_target, nibbleMap);
         _r2rJitManager = new ReadyToRunJitManager(_target);
+        _interpreterJitManager = new InterpreterJitManager(_target, nibbleMap);
     }
 
     public void Flush()
@@ -60,6 +62,7 @@ internal sealed partial class ExecutionManagerCore<T> : IExecutionManager
     {
         CodeHeap = 0x02,
         RangeList = 0x04,
+        Interpreter = 0x08,
     }
 
     // Mirrors the native CodeHeap::CodeHeapType enum in codeman.h.
@@ -117,6 +120,9 @@ internal sealed partial class ExecutionManagerCore<T> : IExecutionManager
         private bool HasFlags(RangeSectionFlags mask) => (Data!.Flags & (int)mask) != 0;
         internal bool IsRangeList => HasFlags(RangeSectionFlags.RangeList);
         internal bool IsCodeHeap => HasFlags(RangeSectionFlags.CodeHeap);
+        internal bool IsInterpreter => HasFlags(RangeSectionFlags.Interpreter);
+
+        internal bool HasR2RModule => Data!.R2RModule != TargetPointer.Null;
 
         internal static bool IsStubCodeBlock(Target target, TargetPointer codeHeaderIndirect)
         {
@@ -152,15 +158,19 @@ internal sealed partial class ExecutionManagerCore<T> : IExecutionManager
         }
     }
 
-    private JitManager GetJitManager(Data.RangeSection rangeSectionData)
+    private JitManager GetJitManager(RangeSection rangeSection)
     {
-        if (rangeSectionData.R2RModule == TargetPointer.Null)
+        if (rangeSection.IsInterpreter)
         {
-            return _eeJitManager;
+            return _interpreterJitManager;
+        }
+        else if (rangeSection.HasR2RModule)
+        {
+            return _r2rJitManager;
         }
         else
         {
-            return _r2rJitManager;
+            return _eeJitManager;
         }
     }
 
@@ -171,7 +181,7 @@ internal sealed partial class ExecutionManagerCore<T> : IExecutionManager
         {
             return null;
         }
-        JitManager jitManager = GetJitManager(range.Data);
+        JitManager jitManager = GetJitManager(range);
         if (jitManager.GetMethodInfo(range, jittedCodeAddress, out CodeBlock? info))
         {
             return info;
@@ -219,7 +229,7 @@ internal sealed partial class ExecutionManagerCore<T> : IExecutionManager
         if (range.Data == null)
             throw new InvalidOperationException("Unable to get runtime function address");
 
-        JitManager jitManager = GetJitManager(range.Data);
+        JitManager jitManager = GetJitManager(range);
         TargetPointer runtimeFunctionPtr = jitManager.GetUnwindInfo(range, codeInfoHandle.Address.Value);
 
         if (runtimeFunctionPtr == TargetPointer.Null)
@@ -243,7 +253,7 @@ internal sealed partial class ExecutionManagerCore<T> : IExecutionManager
         if (range.Data == null)
             throw new InvalidOperationException("Unable to get runtime function address");
 
-        JitManager jitManager = GetJitManager(range.Data);
+        JitManager jitManager = GetJitManager(range);
 
         jitManager.GetMethodRegionInfo(range, codeInfoHandle.Address.Value, out hotSize, out coldStart, out coldSize);
     }
@@ -254,7 +264,7 @@ internal sealed partial class ExecutionManagerCore<T> : IExecutionManager
         if (range.Data == null)
             return JitType.Unknown;
 
-        JitManager jitManager = GetJitManager(range.Data);
+        JitManager jitManager = GetJitManager(range);
 
         if (jitManager == _eeJitManager)
         {
@@ -263,6 +273,10 @@ internal sealed partial class ExecutionManagerCore<T> : IExecutionManager
         else if (jitManager == _r2rJitManager)
         {
             return JitType.R2R;
+        }
+        else if (jitManager == _interpreterJitManager)
+        {
+            return JitType.Interpreter;
         }
         else
         {
@@ -299,7 +313,7 @@ internal sealed partial class ExecutionManagerCore<T> : IExecutionManager
         }
         else
         {
-            JitManager jitManager = GetJitManager(range.Data);
+            JitManager jitManager = GetJitManager(range);
             if (jitManager.GetMethodInfo(range, entrypoint, out CodeBlock? info) && info != null)
             {
                 return info.MethodDescAddress;
@@ -343,7 +357,7 @@ internal sealed partial class ExecutionManagerCore<T> : IExecutionManager
         if (range.Data == null)
             return TargetPointer.Null;
 
-        JitManager jitManager = GetJitManager(range.Data);
+        JitManager jitManager = GetJitManager(range);
 
         return jitManager.GetUnwindInfo(range, codeInfoHandle.Address.Value);
     }
@@ -364,7 +378,7 @@ internal sealed partial class ExecutionManagerCore<T> : IExecutionManager
         if (range.Data == null)
             return TargetPointer.Null;
 
-        JitManager jitManager = GetJitManager(range.Data);
+        JitManager jitManager = GetJitManager(range);
         return jitManager.GetDebugInfo(range, codeInfoHandle.Address.Value, out hasFlagByte);
     }
 
@@ -377,7 +391,7 @@ internal sealed partial class ExecutionManagerCore<T> : IExecutionManager
         if (range.Data == null)
             return;
 
-        JitManager jitManager = GetJitManager(range.Data);
+        JitManager jitManager = GetJitManager(range);
         jitManager.GetGCInfo(range, codeInfoHandle.Address.Value, out gcInfo, out gcVersion);
     }
 
@@ -480,7 +494,7 @@ internal sealed partial class ExecutionManagerCore<T> : IExecutionManager
         if (range.Data == null)
             return new List<ExceptionClauseInfo>();
 
-        JitManager jitManager = GetJitManager(range.Data);
+        JitManager jitManager = GetJitManager(range);
         jitManager.GetExceptionClauses(range, codeInfoHandle, out TargetPointer startAddr, out TargetPointer endAddr);
         bool isR2R = jitManager is ReadyToRunJitManager;
         DataType clauseType = isR2R ? DataType.R2RExceptionClause : DataType.EEExceptionClause;

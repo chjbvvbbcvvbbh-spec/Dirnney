@@ -288,6 +288,9 @@ public sealed unsafe partial class ClrDataMethodInstance : IXCLRDataMethodInstan
         try
         {
             TargetCodePointer pCode = _target.Contracts.RuntimeTypeSystem.GetNativeCode(_methodDesc);
+            // Resolve interpreter precode to actual interpreter code address if present.
+            // Mirrors GetInterpreterCodeFromInterpreterPrecodeIfPresent in daccess.cpp:5631-5694.
+            pCode = _target.Contracts.PrecodeStubs.GetInterpreterCodeFromInterpreterPrecodeIfPresent(pCode);
             TargetPointer codeStart = pCode.ToAddress(_target);
 
             // No debug info exists at all (e.g. ILStubs).

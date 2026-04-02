@@ -73,6 +73,9 @@ This contract depends on the following descriptors:
 | `HijackArgs` (amd64) | `CalleeSavedRegisters` | CalleeSavedRegisters data structure |
 | `HijackArgs` (amd64 Windows) | `Rsp` | Saved stack pointer |
 | `HijackArgs` (arm/arm64/x86) | For each register `r` saved in HijackArgs, `r` | Register names associated with stored register values |
+| `InterpreterFrame` | `TopInterpMethodContextFrame` | Pointer to the InterpreterFrame's top `InterpMethodContextFrame` |
+| `InterpMethodContextFrame` | `StartIp` | Pointer to the `InterpByteCodeStart` for resolving the MethodDesc |
+| `InterpMethodContextFrame` | `ParentPtr` | Pointer to the parent `InterpMethodContextFrame` in the call chain (null for outermost frame) |
 | `ArgumentRegisters` (arm) | For each register `r` saved in ArgumentRegisters, `r` | Register names associated with stored register values |
 | `CalleeSavedRegisters` | For each callee saved register `r`, `r` | Register names associated with stored register values |
 | `TailCallFrame` (x86 Windows) | `CalleeSavedRegisters` | CalleeSavedRegisters data structure |
@@ -118,6 +121,23 @@ In reality, the actual algorithm is a little more complex fow two reasons. It re
     2. If `frameStack` is not empty, check for skipped Frames. Peek `frameStack` to find a Frame `frame`. Compare the address of `frame` (allocated on the stack) with the caller of the current context's stack pointer (found by unwinding current context one iteration).
     If the address of the `frame` is less than the caller's stack pointer, **return the current context**, pop the top Frame from `frameStack`, and **go to step 3**.
     3. Unwind `currContext` using the Windows style unwinder. **Return the current context**.
+
+#### Interpreter Frame Expansion
+
+When the stack walker encounters an `InterpreterFrame`, it expands it into multiple logical frames by walking the `InterpMethodContextFrame.ParentPtr` chain. The runtime maintains a linked list of `InterpMethodContextFrame` nodes representing each interpreted method currently on the call stack within a single `InterpreterFrame`. The `TopInterpMethodContextFrame` field points to the most recently entered interpreted method, and each node's `ParentPtr` points to its caller.
+
+For each `InterpMethodContextFrame` in the chain, the stack walker yields a separate frame. The `MethodDesc` for each frame is resolved by following:
+`InterpMethodContextFrame.StartIp` -> `InterpByteCodeStart.Method` -> `InterpMethod.MethodDesc`
+
+```
+InterpreterFrame
+  └─ TopInterpMethodContextFrame -> InterpMethodContextFrame (method C)
+                                      └─ ParentPtr -> InterpMethodContextFrame (method B)
+                                                        └─ ParentPtr -> InterpMethodContextFrame (method A)
+                                                                          └─ ParentPtr -> null
+```
+
+This produces three frames in order: C, B, A (innermost to outermost).
 
 
 #### Simple Example

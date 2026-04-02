@@ -817,6 +817,7 @@ public sealed unsafe partial class SOSDacImpl
                 {
                     Contracts.JitType.Jit => JitTypes.TYPE_JIT,
                     Contracts.JitType.R2R => JitTypes.TYPE_PJIT,
+                    Contracts.JitType.Interpreter => JitTypes.TYPE_INTERPRETER,
                     _ => JitTypes.TYPE_UNKNOWN,
                 };
 
@@ -2306,7 +2307,9 @@ public sealed unsafe partial class SOSDacImpl
             if (nativeCodeAddr != TargetCodePointer.Null)
             {
                 data->bHasNativeCode = 1;
-                data->NativeCodeAddr = nativeCodeAddr.ToAddress(_target).ToClrDataAddress(_target);
+                // Resolve interpreter precode to actual interpreter code address if present.
+                TargetCodePointer resolvedAddr = _target.Contracts.PrecodeStubs.GetInterpreterCodeFromInterpreterPrecodeIfPresent(nativeCodeAddr);
+                data->NativeCodeAddr = resolvedAddr.ToAddress(_target).ToClrDataAddress(_target);
             }
             else
             {
@@ -2518,7 +2521,9 @@ public sealed unsafe partial class SOSDacImpl
         ILCodeVersionHandle ilCodeVersion = cv.GetILCodeVersion(nativeCodeVersion);
 
         pReJitData->rejitID = rejit.GetRejitId(ilCodeVersion).Value;
-        pReJitData->NativeCodeAddr = cv.GetNativeCode(nativeCodeVersion).Value;
+        // Resolve interpreter precode to actual interpreter code address if present.
+        TargetCodePointer nativeCode = cv.GetNativeCode(nativeCodeVersion);
+        pReJitData->NativeCodeAddr = _target.Contracts.PrecodeStubs.GetInterpreterCodeFromInterpreterPrecodeIfPresent(nativeCode).Value;
 
         if (nativeCodeVersion.CodeVersionNodeAddress != activeNativeCodeVersion.CodeVersionNodeAddress ||
             nativeCodeVersion.MethodDescAddress != activeNativeCodeVersion.MethodDescAddress)
@@ -5211,19 +5216,20 @@ public sealed unsafe partial class SOSDacImpl
             {
                 r2rImageEnd = r2rImageBase + r2rSize;
             }
-            ClrDataAddress r2rImageBaseAddr = r2rImageBase.ToClrDataAddress(_target);
-            ClrDataAddress r2rImageEndAddr = r2rImageEnd.ToClrDataAddress(_target);
 
             bool isEligibleForTieredCompilation = runtimeTypeSystemContract.IsEligibleForTieredCompilation(methodDescHandle);
 
             int count = 0;
             foreach (NativeCodeVersionHandle nativeCodeVersionHandle in codeVersions.GetNativeCodeVersions(methodDescPtr, ilCodeVersionHandle))
             {
-                ClrDataAddress nativeCodeAddr = codeVersions.GetNativeCode(nativeCodeVersionHandle).Value;
-                nativeCodeAddrs[count].nativeCodeAddr = nativeCodeAddr;
+                // Resolve interpreter precode to actual interpreter code address if present.
+                TargetCodePointer nativeCode = codeVersions.GetNativeCode(nativeCodeVersionHandle);
+                nativeCode = _target.Contracts.PrecodeStubs.GetInterpreterCodeFromInterpreterPrecodeIfPresent(nativeCode);
+                TargetPointer nativeCodeAddr = nativeCode.ToAddress(_target);
+                nativeCodeAddrs[count].nativeCodeAddr = nativeCodeAddr.ToClrDataAddress(_target);
                 nativeCodeAddrs[count].nativeCodeVersionNodePtr = nativeCodeVersionHandle.CodeVersionNodeAddress.ToClrDataAddress(_target);
 
-                if (r2rImageBaseAddr <= nativeCodeAddr && nativeCodeAddr < r2rImageEndAddr)
+                if (r2rImageBase <= nativeCodeAddr && nativeCodeAddr < r2rImageEnd)
                 {
                     nativeCodeAddrs[count].optimizationTier = DacpTieredVersionData.OptimizationTier.ReadyToRun;
                 }

@@ -46,7 +46,8 @@ internal partial class StackWalk_1 : IStackWalk
         TargetPointer FrameAddress,
         ThreadData ThreadData,
         bool IsResumableFrame = false,
-        bool IsActiveFrame = false) : IStackDataFrameHandle
+        bool IsActiveFrame = false,
+        TargetPointer InterpContextFramePtr = default) : IStackDataFrameHandle
     { }
 
     private class StackWalkData(IPlatformAgnosticContext context, StackWalkState state, FrameIterator frameIter, ThreadData threadData)
@@ -55,7 +56,6 @@ internal partial class StackWalk_1 : IStackWalk
         public StackWalkState State { get; set; } = state;
         public FrameIterator FrameIter { get; set; } = frameIter;
         public ThreadData ThreadData { get; set; } = threadData;
-
 
         // Track isFirst exactly like native CrawlFrame::isFirst in StackFrameIterator.
         // Starts true, set false after processing a managed (frameless) frame,
@@ -97,11 +97,11 @@ internal partial class StackWalk_1 : IStackWalk
             }
         }
 
-        public StackDataFrameHandle ToDataFrame()
+        public StackDataFrameHandle ToDataFrame(TargetPointer interpContextFramePtr = default)
         {
             bool isResumable = IsCurrentFrameResumable();
             bool isActiveFrame = IsFirst && State == StackWalkState.SW_FRAMELESS;
-            return new(Context.Clone(), State, FrameIter.CurrentFrameAddress, ThreadData, isResumable, isActiveFrame);
+            return new(Context.Clone(), State, FrameIter.CurrentFrameAddress, ThreadData, isResumable, isActiveFrame, interpContextFramePtr);
         }
     }
 
@@ -164,14 +164,38 @@ internal partial class StackWalk_1 : IStackWalk
             stackWalkData.State = StackWalkState.SW_SKIPPED_FRAME;
         }
 
-        yield return stackWalkData.ToDataFrame();
+        foreach (StackDataFrameHandle frame in YieldFrames(stackWalkData))
+            yield return frame;
         stackWalkData.AdvanceIsFirst();
 
         while (Next(stackWalkData))
         {
-            yield return stackWalkData.ToDataFrame();
+            foreach (StackDataFrameHandle frame in YieldFrames(stackWalkData))
+                yield return frame;
             stackWalkData.AdvanceIsFirst();
         }
+    }
+
+    /// <summary>
+    /// Yields one or more data frames for the current stack walk position.
+    /// For InterpreterFrame, walks the InterpMethodContextFrame.pParent chain
+    /// to yield a separate frame for each interpreted method in the call chain.
+    /// </summary>
+    private IEnumerable<StackDataFrameHandle> YieldFrames(StackWalkData stackWalkData)
+    {
+        if (stackWalkData.State is StackWalkState.SW_FRAME or StackWalkState.SW_SKIPPED_FRAME)
+        {
+            TargetPointer frameAddress = stackWalkData.FrameIter.CurrentFrameAddress;
+            if (frameAddress != TargetPointer.Null
+                && stackWalkData.FrameIter.GetCurrentFrameType() == FrameIterator.FrameType.InterpreterFrame)
+            {
+                foreach (TargetPointer contextFramePtr in FrameIterator.WalkInterpreterFrameChain(_target, frameAddress))
+                    yield return stackWalkData.ToDataFrame(contextFramePtr);
+                yield break;
+            }
+        }
+
+        yield return stackWalkData.ToDataFrame();
     }
 
     IReadOnlyList<StackReferenceData> IStackWalk.WalkStackReferences(ThreadData threadData)
@@ -695,6 +719,12 @@ internal partial class StackWalk_1 : IStackWalk
     TargetPointer IStackWalk.GetMethodDescPtr(IStackDataFrameHandle stackDataFrameHandle)
     {
         StackDataFrameHandle handle = AssertCorrectHandle(stackDataFrameHandle);
+
+        // If this is a synthetic interpreter chain frame, resolve directly from the specific context frame
+        if (handle.InterpContextFramePtr != TargetPointer.Null)
+        {
+            return FrameIterator.ResolveMethodDescFromInterpFrame(_target, handle.InterpContextFramePtr);
+        }
 
         // if we are at a capital F Frame, we can get the method desc from the frame
         TargetPointer framePtr = ((IStackWalk)this).GetFrameAddress(handle);

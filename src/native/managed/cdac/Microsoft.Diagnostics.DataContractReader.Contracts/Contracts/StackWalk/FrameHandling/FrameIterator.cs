@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System;
+using System.Collections.Generic;
 
 namespace Microsoft.Diagnostics.DataContractReader.Contracts.StackWalkHelpers;
 
@@ -22,6 +23,7 @@ internal sealed class FrameIterator
         CallCountingHelperFrame,
         ExternalMethodFrame,
         DynamicHelperFrame,
+        InterpreterFrame,
 
         FuncEvalFrame,
 
@@ -41,7 +43,6 @@ internal sealed class FrameIterator
         DebuggerExitFrame,
         DebuggerU2MCatchHandlerFrame,
         ExceptionFilterFrame,
-        InterpreterFrame,
     }
 
     private readonly Target target;
@@ -95,6 +96,7 @@ internal sealed class FrameIterator
             case FrameType.CallCountingHelperFrame:
             case FrameType.ExternalMethodFrame:
             case FrameType.DynamicHelperFrame:
+            case FrameType.InterpreterFrame:
                 // FrameMethodFrame is the base type for all transition Frames
                 Data.FramedMethodFrame framedMethodFrame = target.ProcessedData.GetOrAdd<Data.FramedMethodFrame>(CurrentFrame.Address);
                 GetFrameHandler(context).HandleTransitionFrame(framedMethodFrame);
@@ -201,9 +203,13 @@ internal sealed class FrameIterator
             case FrameType.ExternalMethodFrame:
             case FrameType.PrestubMethodFrame:
             case FrameType.CallCountingHelperFrame:
-            case FrameType.InterpreterFrame:
                 Data.FramedMethodFrame framedMethodFrame = target.ProcessedData.GetOrAdd<Data.FramedMethodFrame>(frame.Address);
                 return framedMethodFrame.MethodDescPtr;
+            case FrameType.InterpreterFrame:
+                {
+                    Data.InterpreterFrame interpreterFrame = target.ProcessedData.GetOrAdd<Data.InterpreterFrame>(frame.Address);
+                    return ResolveMethodDescFromInterpFrame(target, interpreterFrame.TopInterpMethodContextFrame);
+                }
             case FrameType.PInvokeCalliFrame:
                 return TargetPointer.Null;
             case FrameType.StubDispatchFrame:
@@ -230,6 +236,44 @@ internal sealed class FrameIterator
                     return TargetPointer.Null;
             default:
                 return TargetPointer.Null;
+        }
+    }
+
+    /// <summary>
+    /// Resolves the MethodDesc from a specific InterpMethodContextFrame by following:
+    /// InterpMethodContextFrame.StartIp -> InterpByteCodeStart.Method -> InterpMethod.methodHnd
+    /// </summary>
+    internal static TargetPointer ResolveMethodDescFromInterpFrame(Target target, TargetPointer interpMethodFramePtr)
+    {
+        if (interpMethodFramePtr == TargetPointer.Null)
+            return TargetPointer.Null;
+
+        Data.InterpMethodContextFrame contextFrame = target.ProcessedData.GetOrAdd<Data.InterpMethodContextFrame>(interpMethodFramePtr);
+        if (contextFrame.StartIp == TargetPointer.Null)
+            return TargetPointer.Null;
+
+        Data.InterpByteCodeStart byteCodeStart = target.ProcessedData.GetOrAdd<Data.InterpByteCodeStart>(contextFrame.StartIp);
+        if (byteCodeStart.Method == TargetPointer.Null)
+            return TargetPointer.Null;
+
+        Data.InterpMethod interpMethod = target.ProcessedData.GetOrAdd<Data.InterpMethod>(byteCodeStart.Method);
+
+        return interpMethod.MethodDesc;
+    }
+
+    /// <summary>
+    /// Walks the InterpMethodContextFrame.ParentPtr chain for an InterpreterFrame,
+    /// yielding one context frame pointer per interpreted method in the call chain.
+    /// </summary>
+    internal static IEnumerable<TargetPointer> WalkInterpreterFrameChain(Target target, TargetPointer frameAddress)
+    {
+        Data.InterpreterFrame interpFrame = target.ProcessedData.GetOrAdd<Data.InterpreterFrame>(frameAddress);
+        TargetPointer interpMethodFramePtr = interpFrame.TopInterpMethodContextFrame;
+        while (interpMethodFramePtr != TargetPointer.Null)
+        {
+            yield return interpMethodFramePtr;
+            Data.InterpMethodContextFrame contextFrame = target.ProcessedData.GetOrAdd<Data.InterpMethodContextFrame>(interpMethodFramePtr);
+            interpMethodFramePtr = contextFrame.ParentPtr;
         }
     }
 
