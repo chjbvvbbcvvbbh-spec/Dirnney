@@ -375,24 +375,55 @@ namespace System.Collections.Immutable
                 return true;
             }
 
+            switch (other)
+            {
+                case ImmutableSortedSet<T> otherAsImmutableSortedSet:
+                    if (otherAsImmutableSortedSet.Count != this.Count)
+                    {
+                        return false;
+                    }
+
+                    if (EqualityComparer<IComparer<T>>.Default.Equals(this.KeyComparer, otherAsImmutableSortedSet.KeyComparer))
+                    {
+                        return SetEqualsWithImmutableSortedSet(otherAsImmutableSortedSet, this);
+                    }
+                    break;
+
+                case SortedSet<T> otherAsSortedSet:
+                    if (otherAsSortedSet.Count != this.Count)
+                    {
+                        return false;
+                    }
+
+                    if (EqualityComparer<IComparer<T>>.Default.Equals(this.KeyComparer, otherAsSortedSet.Comparer))
+                    {
+                        return SetEqualsWithSortedSet(otherAsSortedSet, this);
+                    }
+                    break;
+
+                case ICollection<T> otherAsICollectionGeneric:
+                    // We check for < instead of != because other is not guaranteed to be a set; it could be a collection with duplicates.
+                    if (otherAsICollectionGeneric.Count < this.Count)
+                    {
+                        return false;
+                    }
+                    break;
+
+                case ICollection otherAsICollection:
+                    if (otherAsICollection.Count < this.Count)
+                    {
+                        return false;
+                    }
+                    break;
+            }
+
             var otherSet = new SortedSet<T>(other, this.KeyComparer);
-            if (this.Count != otherSet.Count)
+            if (otherSet.Count != this.Count)
             {
                 return false;
             }
 
-            int matches = 0;
-            foreach (T item in otherSet)
-            {
-                if (!this.Contains(item))
-                {
-                    return false;
-                }
-
-                matches++;
-            }
-
-            return matches == this.Count;
+            return SetEqualsWithSortedSet(otherSet, this);
         }
 
         /// <summary>
@@ -1014,6 +1045,42 @@ namespace System.Collections.Immutable
             }
 
             return false;
+        }
+
+        private static bool SetEqualsWithImmutableSortedSet(ImmutableSortedSet<T> other, ImmutableSortedSet<T> source)
+        {
+            // We can use a linear scan because both sets are sorted using the same comparer.
+            using var e = other.GetEnumerator();
+            foreach (T item in source)
+            {
+                bool eHasMore = e.MoveNext();
+                Debug.Assert(eHasMore);
+
+                if (source.KeyComparer.Compare(item, e.Current) != 0)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static bool SetEqualsWithSortedSet(SortedSet<T> other, ImmutableSortedSet<T> source)
+        {
+           // We can use a linear scan because both sets are sorted using the same comparer.
+            using var e = other.GetEnumerator();
+            foreach (T item in source)
+            {
+                bool eHasMore = e.MoveNext();
+                Debug.Assert(eHasMore);
+
+                if (source.KeyComparer.Compare(item, e.Current) != 0)
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         /// <summary>
