@@ -4316,8 +4316,6 @@ void emitter::emitSetMediumJump(instrDescJmp* id)
 /*****************************************************************************
  *
  *  Add a jmp instruction.
- *  When dst is NULL, instrCount specifies number of instructions
- *       to jump: positive is forward, negative is backward.
  *  Unconditional branches have two sizes: short and long.
  *  Conditional branches have three sizes: short, medium, and long. A long
  *     branch is a pseudo-instruction that represents two instructions:
@@ -4325,20 +4323,12 @@ void emitter::emitSetMediumJump(instrDescJmp* id)
  *     branch. Thus, we can handle branch offsets of imm24 instead of just imm20.
  */
 
-void emitter::emitIns_J(instruction ins, BasicBlock* dst, int instrCount /* = 0 */)
+void emitter::emitIns_J(instruction ins, BasicBlock* dst)
 {
-    insFormat fmt = IF_NONE;
-
-    if (dst != NULL)
-    {
-        assert(dst->HasFlag(BBF_HAS_LABEL));
-    }
-    else
-    {
-        assert(instrCount != 0);
-    }
+    assert(dst->HasFlag(BBF_HAS_LABEL));
 
     /* Figure out the encoding format of the instruction */
+    insFormat fmt = IF_NONE;
     switch (ins)
     {
         case INS_b:
@@ -4384,25 +4374,16 @@ void emitter::emitIns_J(instruction ins, BasicBlock* dst, int instrCount /* = 0 
 
     /* Assume the jump will be long */
 
-    id->idjShort = 0;
-    if (dst != NULL)
-    {
-        id->idAddr()->iiaBBlabel = dst;
-        id->idjKeepLong          = (ins == INS_bl) || m_compiler->fgInDifferentRegions(m_compiler->compCurBB, dst);
+    id->idjShort             = 0;
+    id->idAddr()->iiaBBlabel = dst;
+    id->idjKeepLong          = (ins == INS_bl) || m_compiler->fgInDifferentRegions(m_compiler->compCurBB, dst);
 
 #ifdef DEBUG
-        if (m_compiler->opts.compLongAddress) // Force long branches
-            id->idjKeepLong = 1;
-#endif // DEBUG
-    }
-    else
+    if (m_compiler->opts.compLongAddress) // Force long branches
     {
-        id->idAddr()->iiaSetInstrCount(instrCount);
-        id->idjKeepLong = false;
-        /* This jump must be short */
-        emitSetShortJump(id);
-        id->idSetIsBound();
+        id->idjKeepLong = 1;
     }
+#endif // DEBUG
 
     /* Record the jump's IG and offset within it */
 
@@ -5302,22 +5283,7 @@ BYTE* emitter::emitOutputLJ(insGroup* ig, BYTE* dst, instrDesc* i)
     /* Figure out the distance to the target */
 
     srcOffs = emitCurCodeOffs(dst);
-    if (id->idAddr()->iiaHasInstrCount())
-    {
-        assert(ig != NULL);
-        int      instrCount = id->idAddr()->iiaGetInstrCount();
-        unsigned insNum     = emitFindInsNum(ig, id);
-        if (instrCount < 0)
-        {
-            // Backward branches using instruction count must be within the same instruction group.
-            assert(insNum + 1 >= (unsigned)(-instrCount));
-        }
-        dstOffs = ig->igOffs + emitFindOffset(ig, (insNum + 1 + instrCount));
-    }
-    else
-    {
-        dstOffs = id->idAddr()->iiaIGlabel->igOffs;
-    }
+    dstOffs = id->idAddr()->iiaIGlabel->igOffs;
 
     if (relAddr)
     {
