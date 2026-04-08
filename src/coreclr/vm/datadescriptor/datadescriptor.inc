@@ -184,6 +184,9 @@ CDAC_TYPE_FIELD(InteropSyncBlockInfo, T_POINTER, CCW, cdac_data<InteropSyncBlock
 CDAC_TYPE_FIELD(InteropSyncBlockInfo, T_POINTER, RCW, cdac_data<InteropSyncBlockInfo>::RCW)
 CDAC_TYPE_FIELD(InteropSyncBlockInfo, T_POINTER, CCF, cdac_data<InteropSyncBlockInfo>::CCF)
 #endif // FEATURE_COMINTEROP
+#ifdef FEATURE_OBJCMARSHAL
+CDAC_TYPE_FIELD(InteropSyncBlockInfo, /*pointer*/, TaggedMemory, cdac_data<InteropSyncBlockInfo>::TaggedMemory)
+#endif // FEATURE_OBJCMARSHAL
 CDAC_TYPE_END(InteropSyncBlockInfo)
 
 CDAC_TYPE_BEGIN(SyncBlock)
@@ -1480,6 +1483,9 @@ CDAC_GLOBAL_CONTRACT(AuxiliarySymbols, 1)
 #if FEATURE_COMINTEROP
 CDAC_GLOBAL_CONTRACT(BuiltInCOM, 1)
 #endif // FEATURE_COMINTEROP
+#ifdef FEATURE_OBJCMARSHAL
+CDAC_GLOBAL_CONTRACT(ObjectiveCMarshal, 1)
+#endif // FEATURE_OBJCMARSHAL
 CDAC_GLOBAL_CONTRACT(CodeVersions, 1)
 #ifdef FEATURE_COMWRAPPERS
 CDAC_GLOBAL_CONTRACT(ComWrappers, 1)
