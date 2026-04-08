@@ -1,8 +1,10 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System;
 using System.Linq;
 using Microsoft.Diagnostics.DataContractReader.Contracts;
+using Microsoft.DotNet.XUnitExtensions;
 using Xunit;
 
 namespace Microsoft.Diagnostics.DataContractReader.DumpTests;
@@ -21,6 +23,18 @@ public class InterpreterStackDumpTests : DumpTestBase
 {
     protected override string DebuggeeName => "InterpreterStack";
     protected override string DumpType => "full";
+
+    private void SkipIfInterpreterNotAvailable()
+    {
+        try
+        {
+            Target.GetTypeInfo(DataType.InterpreterFrame);
+        }
+        catch (InvalidOperationException)
+        {
+            throw new SkipTestException("Interpreter support not available in this runtime build (FEATURE_INTERPRETER not enabled).");
+        }
+    }
 
     private void AssertInterpreted(ResolvedFrame f)
     {
@@ -61,6 +75,7 @@ public class InterpreterStackDumpTests : DumpTestBase
     public void StackWalk_VerifyInterleavedStackLayout(TestConfiguration config)
     {
         InitializeDumpTest(config);
+        SkipIfInterpreterNotAvailable();
 
         ThreadData crashingThread = DumpTestHelpers.FindFailFastThread(Target);
 
@@ -91,6 +106,7 @@ public class InterpreterStackDumpTests : DumpTestBase
     public void StackWalk_InterpreterMethodNativeCodeIsPrecode(TestConfiguration config)
     {
         InitializeDumpTest(config);
+        SkipIfInterpreterNotAvailable();
         IRuntimeTypeSystem rts = Target.Contracts.RuntimeTypeSystem;
         IExecutionManager executionManager = Target.Contracts.ExecutionManager;
 
@@ -117,6 +133,7 @@ public class InterpreterStackDumpTests : DumpTestBase
     public void Thread_CanEnumerateWithInterpreterFrames(TestConfiguration config)
     {
         InitializeDumpTest(config);
+        SkipIfInterpreterNotAvailable();
         IThread threadContract = Target.Contracts.Thread;
 
         ThreadStoreData storeData = threadContract.GetThreadStoreData();
