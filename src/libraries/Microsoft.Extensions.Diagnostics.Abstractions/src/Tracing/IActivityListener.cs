@@ -4,7 +4,7 @@
 using System;
 using System.Diagnostics;
 
-namespace Microsoft.Extensions.Diagnostics.Configuration
+namespace Microsoft.Extensions.Diagnostics.Tracing
 {
     /// <summary>
     /// Receives activity callbacks from the tracing system.

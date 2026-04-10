@@ -4,7 +4,7 @@
 using System;
 using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Diagnostics.Configuration;
+using Microsoft.Extensions.Diagnostics.Tracing;
 using Microsoft.Extensions.Options;
 
 namespace Microsoft.Extensions.DependencyInjection

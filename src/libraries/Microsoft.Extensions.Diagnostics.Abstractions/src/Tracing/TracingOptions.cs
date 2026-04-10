@@ -3,7 +3,7 @@
 
 using System.Collections.Generic;
 
-namespace Microsoft.Extensions.Diagnostics.Configuration
+namespace Microsoft.Extensions.Diagnostics.Tracing
 {
     /// <summary>
     /// Represents options for configuring the tracing system.

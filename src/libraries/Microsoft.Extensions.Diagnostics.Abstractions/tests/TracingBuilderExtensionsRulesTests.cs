@@ -3,7 +3,7 @@
 
 using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Diagnostics.Configuration;
+using Microsoft.Extensions.Diagnostics.Tracing;
 using Microsoft.Extensions.Options;
 using Xunit;
 

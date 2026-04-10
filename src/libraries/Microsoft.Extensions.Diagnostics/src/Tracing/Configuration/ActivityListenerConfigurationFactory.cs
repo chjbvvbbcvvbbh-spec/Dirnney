@@ -5,7 +5,7 @@ using System;
 using System.Collections.Generic;
 using Microsoft.Extensions.Configuration;
 
-namespace Microsoft.Extensions.Diagnostics.Configuration
+namespace Microsoft.Extensions.Diagnostics.Tracing
 {
     internal sealed class ActivityListenerConfigurationFactory
     {

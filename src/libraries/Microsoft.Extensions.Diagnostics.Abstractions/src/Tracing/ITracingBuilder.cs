@@ -3,7 +3,7 @@
 
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Microsoft.Extensions.Diagnostics.Configuration
+namespace Microsoft.Extensions.Diagnostics.Tracing
 {
     /// <summary>
     /// Configures the tracing system by registering <see cref="IActivityListener"/> implementations and using

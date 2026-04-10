@@ -6,7 +6,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Diagnostics.Configuration;
+using Microsoft.Extensions.Diagnostics.Tracing;
 using Microsoft.Extensions.Options;
 using Xunit;
 
@@ -123,7 +123,7 @@ namespace Microsoft.Extensions.Diagnostics.Tests
         }
 
         private static Type GetActivityListenerConfigurationFactoryType()
-            => typeof(TracingServiceExtensions).Assembly.GetType("Microsoft.Extensions.Diagnostics.Configuration.ActivityListenerConfigurationFactory", throwOnError: true)!;
+            => typeof(TracingServiceExtensions).Assembly.GetType("Microsoft.Extensions.Diagnostics.Tracing.ActivityListenerConfigurationFactory", throwOnError: true)!;
 
         [Fact]
         public void ScopeConfigurationMatchesSampleBehavior()

@@ -5,7 +5,7 @@ using System;
 using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Microsoft.Extensions.Diagnostics.Configuration
+namespace Microsoft.Extensions.Diagnostics.Tracing
 {
     /// <summary>
     /// Extension methods for <see cref="ITracingBuilder"/> to configure tracing rules.

@@ -3,7 +3,7 @@
 
 using System;
 
-namespace Microsoft.Extensions.Diagnostics.Configuration
+namespace Microsoft.Extensions.Diagnostics.Tracing
 {
     /// <summary>
     /// Represents scopes used by <see cref="TracingRule"/> to distinguish between activity sources created directly

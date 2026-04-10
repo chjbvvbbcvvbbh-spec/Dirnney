@@ -10,8 +10,8 @@ namespace Microsoft.Extensions.DependencyInjection
     }
     public static class TracingServiceExtensions
     {
-        public static Microsoft.Extensions.Diagnostics.Configuration.ITracingBuilder AddTracing(this Microsoft.Extensions.DependencyInjection.IServiceCollection services) { throw null; }
-        public static Microsoft.Extensions.Diagnostics.Configuration.ITracingBuilder AddTracing(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Microsoft.Extensions.Diagnostics.Configuration.ITracingBuilder> configure) { throw null; }
+        public static Microsoft.Extensions.Diagnostics.Tracing.ITracingBuilder AddTracing(this Microsoft.Extensions.DependencyInjection.IServiceCollection services) { throw null; }
+        public static Microsoft.Extensions.Diagnostics.Tracing.ITracingBuilder AddTracing(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Microsoft.Extensions.Diagnostics.Tracing.ITracingBuilder> configure) { throw null; }
     }
 }
 namespace Microsoft.Extensions.Diagnostics.Metrics
@@ -29,7 +29,7 @@ namespace Microsoft.Extensions.Diagnostics.Metrics
         public static IMetricsBuilder AddConfiguration(this IMetricsBuilder builder, Microsoft.Extensions.Configuration.IConfiguration configuration) => throw null!;
     }
 }
-namespace Microsoft.Extensions.Diagnostics.Configuration
+namespace Microsoft.Extensions.Diagnostics.Tracing
 {
     public static class TracingBuilderExtensions
     {

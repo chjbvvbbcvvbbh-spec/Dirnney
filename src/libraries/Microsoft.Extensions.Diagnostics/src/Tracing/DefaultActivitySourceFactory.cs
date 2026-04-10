@@ -8,7 +8,7 @@ using System.Linq;
 using System.Threading;
 using Microsoft.Extensions.Options;
 
-namespace Microsoft.Extensions.Diagnostics.Configuration
+namespace Microsoft.Extensions.Diagnostics.Tracing
 {
     internal sealed class DefaultActivitySourceFactory : IActivitySourceFactory
     {

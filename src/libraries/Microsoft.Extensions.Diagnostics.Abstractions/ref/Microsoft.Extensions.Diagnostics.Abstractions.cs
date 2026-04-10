@@ -73,7 +73,7 @@ namespace Microsoft.Extensions.Diagnostics.Metrics
         public IList<InstrumentRule> Rules { get; } = null!;
     }
 }
-namespace Microsoft.Extensions.Diagnostics.Configuration
+namespace Microsoft.Extensions.Diagnostics.Tracing
 {
     public interface ITracingBuilder
     {
