@@ -377,22 +377,15 @@ namespace System.Diagnostics
         {
             ArgumentNullException.ThrowIfNull(listener);
 
-            if (!s_allListeners.Any(x => x == listener))
-            {
-                AddActivityListener(listener);
-                return;
-            }
+            s_allListeners.AddIfNotExist(listener);
 
             s_activeSources.EnumWithAction((source, obj) => {
                 var ls = (ActivityListener)obj;
-                var shouldListenTo = ((ActivityListener)obj).ShouldListenTo?.Invoke(source) ?? false;
-                var present = source._listeners != null && source._listeners.Any(x => x == ls);
-
-                if (shouldListenTo && !present)
+                if (ls.ShouldListenTo?.Invoke(source) ?? false)
                 {
                     source.AddListener(ls);
                 }
-                else if (!shouldListenTo && present)
+                else
                 {
                     source.RemoveListener(ls);
                 }
@@ -549,19 +542,6 @@ namespace System.Diagnostics
             {
                 action(item, arg);
             }
-        }
-
-        public bool Any(Func<T, bool> predicate)
-        {
-            foreach (T item in _volatileArray)
-            {
-                if (predicate(item))
-                {
-                    return true;
-                }
-            }
-
-            return false;
         }
 
         public void EnumWithExceptionNotification(Activity activity, Exception exception, ref TagList tags)

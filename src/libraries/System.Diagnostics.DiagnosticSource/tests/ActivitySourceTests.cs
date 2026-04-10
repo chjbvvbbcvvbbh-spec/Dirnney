@@ -91,20 +91,20 @@ namespace System.Diagnostics.Tests
                 using ActivitySource source = new ActivitySource("ListenerUpdateSource");
                 Assert.False(source.HasListeners());
 
-                bool shouldListen = true;
+                int shouldListen = 1;
                 int startedCount = 0;
                 int stoppedCount = 0;
 
                 using ActivityListener listener = new ActivityListener
                 {
-                    ShouldListenTo = activitySource => shouldListen && object.ReferenceEquals(source, activitySource),
+                    ShouldListenTo = activitySource => Volatile.Read(ref shouldListen) != 0 && object.ReferenceEquals(source, activitySource),
                     ActivityStarted = _ => startedCount++,
                     ActivityStopped = _ => stoppedCount++,
                     Sample = (ref ActivityCreationOptions<ActivityContext> options) => ActivitySamplingResult.AllDataAndRecorded,
                     SampleUsingParentId = (ref ActivityCreationOptions<string> options) => ActivitySamplingResult.AllDataAndRecorded,
                 };
 
-                ActivitySource.AddActivityListener(listener);
+                Parallel.For(0, 16, _ => ActivitySource.UpdateActivityListener(listener));
                 Assert.True(source.HasListeners());
                 using (Activity? activity = source.StartActivity("enabled"))
                 {
@@ -116,8 +116,8 @@ namespace System.Diagnostics.Tests
                 Assert.Equal(1, startedCount);
                 Assert.Equal(1, stoppedCount);
 
-                shouldListen = false;
-                ActivitySource.UpdateActivityListener(listener);
+                Volatile.Write(ref shouldListen, 0);
+                Parallel.For(0, 16, _ => ActivitySource.UpdateActivityListener(listener));
                 Assert.False(source.HasListeners());
                 Assert.Null(source.StartActivity("disabled"));
                 Assert.Equal(1, startedCount);
