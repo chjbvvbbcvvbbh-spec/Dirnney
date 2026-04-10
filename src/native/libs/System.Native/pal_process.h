@@ -33,7 +33,8 @@ PALEXPORT int32_t SystemNative_ForkAndExecProcess(
                    int32_t stdoutFd,       // the fd for the child's stdout
                    int32_t stderrFd,       // the fd for the child's stderr
                    int32_t* inheritedFds,  // array of fds to explicitly inherit (-1 to disable restriction)
-                   int32_t inheritedFdCount); // count of fds in inheritedFds; -1 means no restriction
+                   int32_t inheritedFdCount, // count of fds in inheritedFds; -1 means no restriction
+                   int32_t* outPidfd);     // [out] the pidfd for the child process (-1 if not available)
 
 /************
  * The values below in the header are fixed and correct for managed callers to use forever.
@@ -236,3 +237,14 @@ PALEXPORT int32_t SystemNative_SchedGetAffinity(int32_t pid, intptr_t* mask);
  * resolving symbolic links. The caller is responsible for releasing the buffer.
  */
 PALEXPORT char* SystemNative_GetProcessPath(void);
+
+/**
+ * Opens a process by its process ID.
+ *
+ * On Linux with pidfd support, uses pidfd_open to obtain a process file descriptor.
+ * On other systems, uses kill(pid, 0) to verify the process exists.
+ *
+ * Returns 0 on success; returns -1 on failure and errno is set.
+ * On success, out_pidfd is set to the pidfd (or -1 if pidfd is not available).
+ */
+PALEXPORT int32_t SystemNative_OpenProcess(int32_t pid, int32_t* out_pidfd);

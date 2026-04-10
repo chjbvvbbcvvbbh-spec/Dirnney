@@ -36,7 +36,23 @@
 #  define __NR_close_range 436
 # endif
 #endif // !defined(__NR_close_range)
+#else // HAVE_CLOSE_RANGE
+#include <sys/syscall.h>
 #endif // !defined(HAVE_CLOSE_RANGE)
+#if !defined(SYS_pidfd_open) && !defined(__NR_pidfd_open)
+// pidfd_open was added in Linux 5.3. The syscall number is 434 for all
+// architectures using the generic syscall table (asm-generic/unistd.h),
+// which covers aarch64, riscv, s390x, ppc64le, and others. The exception
+// is alpha, which has its own syscall table and uses 544 instead.
+# if defined(__alpha__)
+#  define __NR_pidfd_open 544
+# else
+#  define __NR_pidfd_open 434
+# endif
+#endif // !defined(SYS_pidfd_open) && !defined(__NR_pidfd_open)
+#if !defined(SYS_pidfd_open) && defined(__NR_pidfd_open)
+#define SYS_pidfd_open __NR_pidfd_open
+#endif
 #endif // defined(__linux__)
 #if (HAVE_CLOSE_RANGE || defined(__NR_close_range)) && !defined(CLOSE_RANGE_CLOEXEC)
 #define CLOSE_RANGE_CLOEXEC (1U << 2)
@@ -324,6 +340,22 @@ static void RestrictHandleInheritance(int32_t* inheritedFds, int32_t inheritedFd
     }
 }
 
+// Attempts to open a pidfd for the given pid using pidfd_open.
+// Returns the pidfd on success, or -1 if pidfd is not available.
+static int32_t TryOpenPidfd(int32_t pid)
+{
+#if defined(__linux__)
+    int pidfd = (int)syscall(SYS_pidfd_open, pid, 0);
+    if (pidfd >= 0)
+    {
+        return pidfd;
+    }
+#else
+    (void)pid;
+#endif
+    return -1;
+}
+
 int32_t SystemNative_ForkAndExecProcess(const char* filename,
                                       char* const argv[],
                                       char* const envp[],
@@ -338,13 +370,15 @@ int32_t SystemNative_ForkAndExecProcess(const char* filename,
                                       int32_t stdoutFd,
                                       int32_t stderrFd,
                                       int32_t* inheritedFds,
-                                      int32_t inheritedFdCount)
+                                      int32_t inheritedFdCount,
+                                      int32_t* outPidfd)
 {
 #if HAVE_FORK || defined(TARGET_OSX)
     assert(NULL != filename && NULL != argv && NULL != envp && NULL != childPid &&
-            (groupsLength == 0 || groups != NULL) && "null argument.");
+            outPidfd != NULL && (groupsLength == 0 || groups != NULL) && "null argument.");
 
     *childPid = -1;
+    *outPidfd = -1;
 
     // Make sure we can find and access the executable. exec will do this, of course, but at that point it's already
     // in the child process, at which point it'll translate to the child process' exit code rather than to failing
@@ -697,6 +731,11 @@ done:;
 
     free(getGroupsBuffer);
 
+    if (success)
+    {
+        *outPidfd = TryOpenPidfd(*childPid);
+    }
+
     return success ? 0 : -1;
 #else
     // ignore unused parameters
@@ -715,6 +754,7 @@ done:;
     (void)stderrFd;
     (void)inheritedFds;
     (void)inheritedFdCount;
+    (void)outPidfd;
     return -1;
 #endif
 }
@@ -1072,4 +1112,15 @@ int32_t SystemNative_SchedGetAffinity(int32_t pid, intptr_t* mask)
 char* SystemNative_GetProcessPath(void)
 {
     return minipal_getexepath();
+}
+
+int32_t SystemNative_OpenProcess(int32_t pid, int32_t* out_pidfd)
+{
+    *out_pidfd = TryOpenPidfd(pid);
+    if (*out_pidfd >= 0)
+    {
+        return 0;
+    }
+
+    return kill(pid, 0);
 }
