@@ -128,7 +128,7 @@ namespace Microsoft.Extensions.Diagnostics.Tracing
 
             protected override void Dispose(bool disposing)
             {
-                // no-op, disallow users from disposing of the meters created from the factory.
+                // no-op, disallow users from disposing of the activity sources created by the factory.
             }
         }
 
