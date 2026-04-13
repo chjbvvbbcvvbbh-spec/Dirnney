@@ -8,12 +8,13 @@ namespace Microsoft.Extensions.Diagnostics.Tracing
 {
     /// <summary>
     /// Contains a set of parameters used to determine which activities are enabled for which listeners.
-    /// Unspecified parameters match anything.
+    /// An unspecified <see cref="ActivitySourceName"/> matches all activity sources, while an unspecified
+    /// <see cref="ListenerName"/> matches only the default or unnamed listener bucket.
     /// </summary>
     /// <remarks>
     /// <para>The most specific rule that matches a given activity will be used. The priority of parameters is as follows:</para>
     /// <para>- ListenerName, an exact match. See <see cref="IActivityListener.Name"/>.</para>
-    /// <para>- ActivitySourceName, either an exact match, or the longest prefix match. See <see cref="ActivitySource.Name"/>.</para>
+    /// <para>- ActivitySourceName, either an exact match or a wildcard match using a single <c>*</c>. See <see cref="ActivitySource.Name"/>.</para>
     /// </remarks>
     public class TracingRule
     {
