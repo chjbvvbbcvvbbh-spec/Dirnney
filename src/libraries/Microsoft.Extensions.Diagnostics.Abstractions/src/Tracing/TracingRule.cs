@@ -57,7 +57,7 @@ namespace Microsoft.Extensions.Diagnostics.Tracing
         /// Gets the <see cref="IActivityListener.Name"/>, an exact match.
         /// </summary>
         /// <value>
-        /// The listener name. If <see langword="null"/>, all listeners are matched.
+        /// The listener name. If <see langword="null"/>, the default or unnamed listener bucket is matched.
         /// </value>
         public string? ListenerName { get; }
 
