@@ -61,7 +61,7 @@ namespace Microsoft.Extensions.DependencyInjection
         {
             public void Configure(NoOpOptions options)
             {
-                _ = factory.GetHashCode(); // Force the creation of the default activity source and registration of the default listener.
+                _ = factory.GetHashCode(); // Eagerly instantiate the factory so any constructor-based listener registration happens during startup.
             }
         }
     }
