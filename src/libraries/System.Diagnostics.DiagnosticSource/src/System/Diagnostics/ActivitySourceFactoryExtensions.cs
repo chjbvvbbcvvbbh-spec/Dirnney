@@ -22,12 +22,18 @@ namespace System.Diagnostics
         {
             ArgumentNullException.ThrowIfNull(activitySourceFactory);
 
-            return activitySourceFactory.Create(new ActivitySourceOptions(name)
+            ActivitySourceOptions options = new(name)
             {
-                Version = version,
                 Tags = tags,
                 Scope = activitySourceFactory,
-            });
+            };
+
+            if (version is not null)
+            {
+                options.Version = version;
+            }
+
+            return activitySourceFactory.Create(options);
         }
     }
 }
