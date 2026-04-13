@@ -54,6 +54,11 @@ PhaseStatus Compiler::optRedundantBranches()
 
                 madeChangesThisBlock |= m_compiler->optRedundantBranch(block);
 
+                if (block->KindIs(BBJ_COND))
+                {
+                    madeChangesThisBlock |= m_compiler->optRedundantDominatingBranch(block);
+                }
+
                 // If we modified some flow out of block but it's still referenced and
                 // a BBJ_COND, retry; perhaps one of the later optimizations
                 // we can do has enabled one of the earlier optimizations.
@@ -85,7 +90,7 @@ PhaseStatus Compiler::optRedundantBranches()
                     for (BasicBlock* succ : bbTrue->Succs())
                     {
                         JITDUMP("Will retry RBO in " FMT_BB "; pred " FMT_BB " now unreachable\n", succ->bbNum,
-                                bbFalse->bbNum);
+                                bbTrue->bbNum);
                         m_compiler->optRedundantBranch(succ);
                     }
                 }
@@ -377,7 +382,8 @@ static const RelopImplicationRule s_implicationRules[] =
 // clang-format on
 
 //------------------------------------------------------------------------
-// optRedundantBranch: try and optimize a possibly redundant branch
+// optRelopImpliesRelop: determine if a dominating relop implies the value
+//   of another relop.
 //
 // Arguments:
 //   rii - struct with relop implication information
@@ -589,12 +595,12 @@ void Compiler::optRelopImpliesRelop(RelopImplicationInfo* rii)
 }
 
 //------------------------------------------------------------------------
-// optRelopTryInferWithOneEqualOperand: Given a domnating relop R(x, y) and
+// optRelopTryInferWithOneEqualOperand: Given a dominating relop R(x, y) and
 // another relop R*(a, b) that share an operand, try to see if we can infer
 // something about R*(a, b).
 //
 // Arguments:
-//   domApp  - The dominating relop R*(x, y)
+//   domApp  - The dominating relop R(x, y)
 //   treeApp - The dominated relop R*(a, b)
 //   rii     - [out] struct with relop implication information
 //
@@ -706,6 +712,324 @@ bool Compiler::optRelopTryInferWithOneEqualOperand(const VNFuncApp&      domApp,
     rii->canInferFromFalse = (ifFalseStatus != RelopResult::Unknown);
     rii->reverseSense      = (ifFalseStatus == RelopResult::AlwaysTrue) || (ifTrueStatus == RelopResult::AlwaysFalse);
     return true;
+}
+
+//------------------------------------------------------------------------
+// optRedundantDominatingBranch: see if we can optimize a branch in a
+//    dominating block.
+//
+// Arguments:
+//   block - conditional block whose dominators will be probed for redundancy.
+//
+// Notes:
+//   This handles optimizing cases like
+//
+//   if (x > 0)    // block A, predicate pA
+//     if (x > 1)   // block B, predicate pB
+//       S;
+//
+//  into
+//
+//   if (x > 1)
+//     S;
+//
+//  by proving that pB ==> pA and that B is side effect free.
+//
+//  We trigger this starting from block B with successors S and X,
+//  looking up at the immediate dominator A. If A branches to B and
+//  the other successor of A is either S or X, then we have the right
+//  control flow pattern for this optimization.
+//
+//  Suppose X is the shared successor of A and B.
+//
+//  We then see if the predicate for B->S implies the predicate for A->B.
+//  If so, and B is side effect free, we can change A to unconditionally
+//  branch to B.
+//
+//  If this succeeds and A is side effect free, then we can look at the
+//  immediate dominator of A and repeat the process, potentially optimizing
+//  multiple dominating branches.
+//
+//  Note that these dominating compares do not all have to share the
+//  same successor of B, that is if B's successors are S and X, then
+//  some A's can target S and others can target X.
+//
+//  We may also want to make this be heuristic driven. If pA is
+//  likely false and B is expensive, this may not improve performance.
+//
+bool Compiler::optRedundantDominatingBranch(BasicBlock* const block)
+{
+    if (!block->KindIs(BBJ_COND))
+    {
+        return false;
+    }
+
+    if (block->hasSideEffects())
+    {
+        return false;
+    }
+
+    Statement* const stmt = block->lastStmt();
+
+    if (stmt == nullptr)
+    {
+        return false;
+    }
+
+    GenTree* const jumpTree = stmt->GetRootNode();
+
+    if (!jumpTree->OperIs(GT_JTRUE))
+    {
+        return false;
+    }
+
+    GenTree* const tree = jumpTree->AsOp()->gtOp1;
+
+    if (!tree->OperIsCompare())
+    {
+        return false;
+    }
+
+    const ValueNum treeNormVN = vnStore->VNNormalValue(tree->GetVN(VNK_Liberal));
+
+    if (vnStore->IsVNConstant(treeNormVN))
+    {
+        return false;
+    }
+
+    // Skip through chains of empty or side effect free blocks.
+    // Watch for cycles.
+    //
+    auto skipSideEffectFreeBlocks = [=](BasicBlock* b) {
+        BitVecTraits traits(fgBBNumMax + 1, this);
+        BitVec       visitedBlocks = BitVecOps::MakeEmpty(&traits);
+        while (!b->hasSideEffects() && b->KindIs(BBJ_ALWAYS))
+        {
+            b = b->GetUniqueSucc();
+
+            if (!BitVecOps::TryAddElemD(&traits, visitedBlocks, b->bbNum))
+            {
+                // Block is already visited, we have a cycle. Bail out.
+                break;
+            }
+        }
+
+        return b;
+    };
+
+    BasicBlock* const blockTrueSucc  = skipSideEffectFreeBlocks(block->GetTrueTarget());
+    BasicBlock* const blockFalseSucc = skipSideEffectFreeBlocks(block->GetFalseTarget());
+    BasicBlock*       currentBlock   = block;
+    BasicBlock*       domBlockProbe  = fgGetDomSpeculatively(block);
+    ValueNum          blockPathVN    = ValueNumStore::NoVN;
+    bool              madeChanges    = false;
+    unsigned          searchCount    = 0;
+    const unsigned    searchLimit    = 8;
+
+    JITDUMP("Checking " FMT_BB " for redundant dominating branches\n", block->bbNum);
+
+    if (domBlockProbe == nullptr)
+    {
+        JITDUMP("failed -- no dominator\n")
+    }
+
+    // Walk up the dominator tree.
+    // We may be able to optimize multiple dominating branches.
+    //
+    while (domBlockProbe != nullptr)
+    {
+        // Avoid walking too far up long skinny dominator trees.
+        //
+        searchCount++;
+
+        if (searchCount > searchLimit)
+        {
+            JITDUMP("stopping, hit search limit\n");
+            break;
+        }
+
+        // Skip past unconditional dominators, if any, as long as they
+        // do not have side effects (since they may now become unconditionally
+        // executed along the path to block).
+        //
+        while ((domBlockProbe != nullptr) && domBlockProbe->KindIs(BBJ_ALWAYS))
+        {
+            if (domBlockProbe->GetTarget() != currentBlock)
+            {
+                domBlockProbe = nullptr;
+                break;
+            }
+
+            if (domBlockProbe->hasSideEffects())
+            {
+                domBlockProbe = nullptr;
+                break;
+            }
+
+            currentBlock  = domBlockProbe;
+            domBlockProbe = fgGetDomSpeculatively(domBlockProbe);
+        }
+
+        if (domBlockProbe == nullptr)
+        {
+            JITDUMP("failed -- no dominator\n");
+            break;
+        }
+
+        if (!domBlockProbe->KindIs(BBJ_COND))
+        {
+            JITDUMP("failed -- dominator " FMT_BB " is not BBJ_COND\n", domBlockProbe->bbNum);
+            break;
+        }
+
+        // Make sure this conditional dominator branches to the same
+        // shared block as the original block.
+        //
+        BasicBlock* const domTrueSucc  = skipSideEffectFreeBlocks(domBlockProbe->GetTrueTarget());
+        BasicBlock* const domFalseSucc = skipSideEffectFreeBlocks(domBlockProbe->GetFalseTarget());
+
+        const bool currentIsDomTrueSucc  = (domTrueSucc == currentBlock);
+        const bool currentIsDomFalseSucc = (domFalseSucc == currentBlock);
+
+        if (currentIsDomTrueSucc == currentIsDomFalseSucc)
+        {
+            JITDUMP("failed -- " FMT_BB " is degnerate\n", domBlockProbe->bbNum);
+            // degenerate BBJ_COND
+            break;
+        }
+
+        BasicBlock* const sharedSuccessor = currentIsDomTrueSucc ? domFalseSucc : domTrueSucc;
+
+        // Find the VN for the path from block to the non-shared successor.
+        //
+        if (sharedSuccessor == blockFalseSucc)
+        {
+            // Shared successor is block's false successor, so unshared successor is block's true successor.
+            // Thus the path from block to the unshared successor corresponds to the relop being true.
+            //
+            blockPathVN = treeNormVN;
+        }
+        else if (sharedSuccessor == blockTrueSucc)
+        {
+            // Shared successor is block's true successor, so unshared successor is block's false successor.
+            // Thus the path from block to the unshared successor corresponds to the relop being false.
+            //
+            blockPathVN = vnStore->GetRelatedRelop(treeNormVN, ValueNumStore::VN_RELATION_KIND::VRK_Reverse);
+        }
+        else
+        {
+            JITDUMP("failed -- " FMT_BB " does not share a successor with " FMT_BB "\n", domBlockProbe->bbNum,
+                    block->bbNum);
+            break;
+        }
+
+        if (blockPathVN == ValueNumStore::NoVN)
+        {
+            JITDUMP("failed -- " FMT_BB " does not have a usable VN\n", block->bbNum);
+            break;
+        }
+
+        JITDUMP(FMT_BB " and " FMT_BB " have shared successor " FMT_BB "\n", domBlockProbe->bbNum, block->bbNum,
+                sharedSuccessor->bbNum);
+
+        // Find the VN for the path from domBlockProbe to block.
+        //
+        Statement* const domStmt = domBlockProbe->lastStmt();
+        assert(domStmt != nullptr);
+
+        GenTree* const domJumpTree = domStmt->GetRootNode();
+        assert(domJumpTree->OperIs(GT_JTRUE));
+
+        GenTree* const domTree = domJumpTree->AsOp()->gtGetOp1();
+
+        if (!domTree->OperIsCompare())
+        {
+            break;
+        }
+
+        const ValueNum domNormVN = vnStore->VNNormalValue(domTree->GetVN(VNK_Liberal));
+
+        if (vnStore->IsVNConstant(domNormVN))
+        {
+            break;
+        }
+
+        ValueNum domPathVN = domNormVN;
+
+        if (currentIsDomFalseSucc)
+        {
+            domPathVN = vnStore->GetRelatedRelop(domPathVN, ValueNumStore::VN_RELATION_KIND::VRK_Reverse);
+        }
+
+        if (domPathVN == ValueNumStore::NoVN)
+        {
+            break;
+        }
+
+        // We found a dominating compare with the right pattern of control flow.
+        // See if the block's path relop implies the dom's path relop.
+        //
+        RelopImplicationInfo rii;
+        rii.treeNormVN   = domPathVN;
+        rii.domCmpNormVN = blockPathVN;
+
+        optRelopImpliesRelop(&rii);
+
+        if (!(rii.canInfer && rii.canInferFromTrue && !rii.reverseSense))
+        {
+            JITDUMP("failed -- Dominated VN " FMT_VN " does not imply dominating VN " FMT_VN "\n", blockPathVN,
+                    domPathVN);
+            break;
+        }
+
+        JITDUMP("Optimizing branch in dominating " FMT_BB " with relop [%06u] based on " FMT_BB "'s relop [%06u]\n",
+                domBlockProbe->bbNum, dspTreeID(domTree), block->bbNum, dspTreeID(tree));
+
+        const int domRelopValue = currentIsDomTrueSucc ? 1 : 0;
+
+        bool domMayHaveSideEffects = false;
+
+        // Always preserve side effects in the dominating relop.
+        //
+        if ((domTree->gtFlags & GTF_SIDE_EFFECT) != 0)
+        {
+            JITDUMP("Dominating relop has side effects, keeping it, unused\n");
+            GenTree* const relopComma    = gtNewOperNode(GT_COMMA, TYP_INT, domTree, gtNewIconNode(domRelopValue));
+            domJumpTree->AsUnOp()->gtOp1 = relopComma;
+            domMayHaveSideEffects        = true;
+        }
+        else
+        {
+            domTree->BashToConst(domRelopValue);
+        }
+
+        JITDUMP("\nRedundant dominating branch opt in " FMT_BB ":\n", domBlockProbe->bbNum);
+
+        fgMorphBlockStmt(domBlockProbe, domStmt DEBUGARG(__FUNCTION__), /* allowFGChange */ true,
+                         /* invalidateDFSTreeOnFGChange */ false);
+        Metrics.RedundantBranchesEliminated++;
+        madeChanges = true;
+
+        // We can keep looking if we haven't seen any side effects yet along the path to block.
+        //
+        if (!domMayHaveSideEffects)
+        {
+            domMayHaveSideEffects = domBlockProbe->hasSideEffects();
+        }
+
+        if (domMayHaveSideEffects)
+        {
+            JITDUMP("stopping -- side effects seen along path to block\n");
+            break;
+        }
+
+        currentBlock  = domBlockProbe;
+        domBlockProbe = fgGetDomSpeculatively(domBlockProbe);
+
+        JITDUMP("continuing to the next immediate dominator\n");
+    }
+
+    return madeChanges;
 }
 
 //------------------------------------------------------------------------
@@ -1056,6 +1380,9 @@ struct JumpThreadInfo
 // Arguments:
 //   block - block in question
 //   domBlock - dom block used in inferencing (if any)
+//
+// Returns:
+//   True if the block is suitable for jump threading.
 //
 bool Compiler::optJumpThreadCheck(BasicBlock* const block, BasicBlock* const domBlock)
 {
@@ -1566,7 +1893,7 @@ bool Compiler::optJumpThreadPhi(BasicBlock* block, GenTree* tree, ValueNum treeN
         //
         if (vnStore->IsVNConstant(substVN))
         {
-            const bool relopIsTrue = (substVN == vnStore->VNZeroForType(TYP_INT)) ? 0 : 1;
+            const bool relopIsTrue = (substVN != vnStore->VNZeroForType(TYP_INT));
             JITDUMP("... substituted VN implies relop is %d when coming from pred " FMT_BB "\n", relopIsTrue,
                     predBlock->bbNum);
 
@@ -1605,7 +1932,7 @@ bool Compiler::optJumpThreadPhi(BasicBlock* block, GenTree* tree, ValueNum treeN
             jti.m_numAmbiguousPreds++;
 
             // If this was the first ambiguous pred, remember the substVN
-            // and the block that providced it, case we can use later to
+            // and the block that provided it, in case we can use later to
             // sharpen the predicate's liberal normal VN.
             //
             if ((jti.m_numAmbiguousPreds == 1) && (substVN != treeNormVN))
@@ -2243,7 +2570,7 @@ bool Compiler::optRedundantRelop(BasicBlock* const block)
 //   including paths involving EH flow.
 //
 // Arguments:
-//    fromBlock     - staring block
+//    fromBlock     - starting block
 //    toBlock       - ending block
 //    excludedBlock - ignore paths that flow through this block
 //
@@ -2269,7 +2596,7 @@ bool Compiler::optReachable(BasicBlock* const fromBlock, BasicBlock* const toBlo
 //   including paths involving EH flow. Same as optReachable, but with a budget check.
 //
 // Arguments:
-//    fromBlock     - staring block
+//    fromBlock     - starting block
 //    toBlock       - ending block
 //    excludedBlock - ignore paths that flow through this block
 //    pBudget       - number of blocks to examine before returning BudgetExceeded
@@ -2312,46 +2639,27 @@ Compiler::ReachabilityResult Compiler::optReachableWithBudget(BasicBlock* const 
         {
             continue;
         }
-        BasicBlockVisit result;
         bool            budgetExceeded = false;
-        if (pBudget == nullptr)
-        {
-            result = nextBlock->VisitAllSuccs(this, [this, toBlock, &stack](BasicBlock* succ) {
-                if (succ == toBlock)
-                {
-                    return BasicBlockVisit::Abort;
-                }
+        BasicBlockVisit result =
+            nextBlock->VisitAllSuccs(this, [this, toBlock, &stack, &budgetExceeded, pBudget](BasicBlock* succ) {
+            if (succ == toBlock)
+            {
+                return BasicBlockVisit::Abort;
+            }
 
-                if (BitVecOps::TryAddElemD(optReachableBitVecTraits, optReachableBitVec, succ->bbNum))
-                {
-                    stack.Push(succ);
-                }
-                return BasicBlockVisit::Continue;
-            });
-        }
-        else
-        {
-            result =
-                nextBlock->VisitAllSuccs(this, [this, toBlock, &stack, &budgetExceeded, pBudget](BasicBlock* succ) {
-                if (succ == toBlock)
-                {
-                    return BasicBlockVisit::Abort;
-                }
+            if ((pBudget != nullptr) && (--(*pBudget) <= 0))
+            {
+                budgetExceeded = true;
+                return BasicBlockVisit::Abort;
+            }
 
-                if (--(*pBudget) <= 0)
-                {
-                    budgetExceeded = true;
-                    return BasicBlockVisit::Abort;
-                }
+            if (BitVecOps::TryAddElemD(optReachableBitVecTraits, optReachableBitVec, succ->bbNum))
+            {
+                stack.Push(succ);
+            }
 
-                if (BitVecOps::TryAddElemD(optReachableBitVecTraits, optReachableBitVec, succ->bbNum))
-                {
-                    stack.Push(succ);
-                }
-
-                return BasicBlockVisit::Continue;
-            });
-        }
+            return BasicBlockVisit::Continue;
+        });
 
         if (result == BasicBlockVisit::Abort)
         {
