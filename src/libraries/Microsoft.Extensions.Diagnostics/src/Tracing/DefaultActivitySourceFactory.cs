@@ -62,8 +62,15 @@ namespace Microsoft.Extensions.Diagnostics.Tracing
 
                 object? scope = options.Scope;
                 options.Scope = this;
-                FactoryActivitySource activitySource = new FactoryActivitySource(options);
-                options.Scope = scope;
+                FactoryActivitySource activitySource;
+                try
+                {
+                    activitySource = new FactoryActivitySource(options);
+                }
+                finally
+                {
+                    options.Scope = scope;
+                }
 
                 sourceList.Add(activitySource);
                 return activitySource;

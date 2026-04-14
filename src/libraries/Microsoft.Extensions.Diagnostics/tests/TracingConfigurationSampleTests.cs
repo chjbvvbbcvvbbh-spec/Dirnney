@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using Microsoft.Extensions.Configuration;
@@ -263,6 +264,25 @@ namespace Microsoft.Extensions.Diagnostics.Tests
             Assert.DoesNotContain("meter", ex.Message, StringComparison.OrdinalIgnoreCase);
         }
 
+        [Fact]
+        public void ActivitySourceFactoryCreate_RestoresScope_WhenActivitySourceCreationThrows()
+        {
+            using var serviceProvider = new ServiceCollection()
+                .AddTracing(builder => builder.AddListener<SampleActivityListener>())
+                .Services
+                .BuildServiceProvider();
+
+            IActivitySourceFactory activitySourceFactory = serviceProvider.GetRequiredService<IActivitySourceFactory>();
+            ActivitySourceOptions options = new ActivitySourceOptions("Demo.ThrowingScopeSource")
+            {
+                Tags = new ThrowingTagsEnumerable()
+            };
+
+            Assert.Null(options.Scope);
+            Assert.Throws<InvalidOperationException>(() => activitySourceFactory.Create(options));
+            Assert.Null(options.Scope);
+        }
+
         private static TracingOptions CreateOptions(string activitySourceName, bool enabled)
         {
             return CreateOptions(
@@ -312,6 +332,28 @@ namespace Microsoft.Extensions.Diagnostics.Tests
 
             public void ActivityExceptionRecorded(Activity activity, Exception exception, ref TagList tags)
             {
+            }
+        }
+
+        private sealed class ThrowingTagsEnumerable : IEnumerable<KeyValuePair<string, object?>>
+        {
+            public IEnumerator<KeyValuePair<string, object?>> GetEnumerator() => new ThrowingTagsEnumerator();
+
+            IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+            private sealed class ThrowingTagsEnumerator : IEnumerator<KeyValuePair<string, object?>>
+            {
+                public KeyValuePair<string, object?> Current => default;
+
+                object IEnumerator.Current => Current;
+
+                public bool MoveNext() => throw new InvalidOperationException("Test exception.");
+
+                public void Dispose()
+                {
+                }
+
+                public void Reset() => throw new NotSupportedException();
             }
         }
 
