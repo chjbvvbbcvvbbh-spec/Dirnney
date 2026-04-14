@@ -41,6 +41,7 @@ namespace Microsoft.Extensions.DependencyInjection
         /// <returns>The <see cref="ITracingBuilder"/> so that additional calls can be chained.</returns>
         public static ITracingBuilder AddTracing(this IServiceCollection services, Action<ITracingBuilder> configure)
         {
+            ArgumentNullException.ThrowIfNull(services);
             ArgumentNullException.ThrowIfNull(configure);
 
             var builder = services.AddTracing();
