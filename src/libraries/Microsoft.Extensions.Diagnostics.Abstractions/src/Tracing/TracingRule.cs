@@ -9,7 +9,7 @@ namespace Microsoft.Extensions.Diagnostics.Tracing
     /// <summary>
     /// Contains a set of parameters used to determine which activities are enabled for which listeners.
     /// An unspecified <see cref="ActivitySourceName"/> matches all activity sources, while an unspecified
-    /// <see cref="ListenerName"/> matches only the default or unnamed listener bucket.
+    /// <see cref="ListenerName"/> matches all listeners.
     /// </summary>
     /// <remarks>
     /// <para>The most specific rule that matches a given activity will be used. The priority of parameters is as follows:</para>
@@ -58,7 +58,7 @@ namespace Microsoft.Extensions.Diagnostics.Tracing
         /// Gets the <see cref="IActivityListener.Name"/>, an exact match.
         /// </summary>
         /// <value>
-        /// The listener name. If <see langword="null"/>, the default or unnamed listener bucket is matched.
+        /// The listener name. If <see langword="null"/> or empty, all listeners are matched.
         /// </value>
         public string? ListenerName { get; }
 

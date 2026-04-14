@@ -17,7 +17,7 @@ namespace Microsoft.Extensions.Diagnostics.Tracing
         /// </summary>
         /// <param name="builder">The <see cref="ITracingBuilder"/>.</param>
         /// <param name="activitySourceName">The <see cref="ActivitySource.Name"/> or prefix. A null value matches all activity sources.</param>
-        /// <param name="listenerName">The <see cref="IActivityListener"/>.Name. A null value matches all listeners.</param>
+        /// <param name="listenerName">The <see cref="IActivityListener.Name"/>. A null or empty value matches all listeners.</param>
         /// <param name="scopes">A bitwise combination of the enumeration values that specifies the scopes to consider. Defaults to all scopes.</param>
         /// <param name="enabled"><see langword="true"/> to enable matched activities; otherwise, <see langword="false"/>.</param>
         /// <returns>The original <see cref="ITracingBuilder"/> for chaining.</returns>
@@ -29,7 +29,7 @@ namespace Microsoft.Extensions.Diagnostics.Tracing
         /// </summary>
         /// <param name="options">The <see cref="TracingOptions"/>.</param>
         /// <param name="activitySourceName">The <see cref="ActivitySource.Name"/> or prefix. A null value matches all activity sources.</param>
-        /// <param name="listenerName">The <see cref="IActivityListener"/>.Name. A null value matches all listeners.</param>
+        /// <param name="listenerName">The <see cref="IActivityListener.Name"/>. A null or empty value matches all listeners.</param>
         /// <param name="scopes">A bitwise combination of the enumeration values that specifies the scopes to consider. Defaults to all scopes.</param>
         /// <param name="enabled"><see langword="true"/> to enable matched activities; otherwise, <see langword="false"/>.</param>
         /// <returns>The original <see cref="TracingOptions"/> for chaining.</returns>
@@ -41,7 +41,7 @@ namespace Microsoft.Extensions.Diagnostics.Tracing
         /// </summary>
         /// <param name="builder">The <see cref="ITracingBuilder"/>.</param>
         /// <param name="activitySourceName">The <see cref="ActivitySource.Name"/> or prefix. A null value matches all activity sources.</param>
-        /// <param name="listenerName">The <see cref="IActivityListener"/>.Name. A null value matches all listeners.</param>
+        /// <param name="listenerName">The <see cref="IActivityListener.Name"/>. A null or empty value matches all listeners.</param>
         /// <param name="scopes">A bitwise combination of the enumeration values that specifies the scopes to consider. Defaults to all scopes.</param>
         /// <returns>The original <see cref="ITracingBuilder"/> for chaining.</returns>
         public static ITracingBuilder Enable(this ITracingBuilder builder, string? activitySourceName = null, string? listenerName = null, ActivitySourceScope scopes = ActivitySourceScope.Global | ActivitySourceScope.Local)
@@ -52,7 +52,7 @@ namespace Microsoft.Extensions.Diagnostics.Tracing
         /// </summary>
         /// <param name="options">The <see cref="TracingOptions"/>.</param>
         /// <param name="activitySourceName">The <see cref="ActivitySource.Name"/> or prefix. A null value matches all activity sources.</param>
-        /// <param name="listenerName">The <see cref="IActivityListener"/>.Name. A null value matches all listeners.</param>
+        /// <param name="listenerName">The <see cref="IActivityListener.Name"/>. A null or empty value matches all listeners.</param>
         /// <param name="scopes">A bitwise combination of the enumeration values that specifies the scopes to consider. Defaults to all scopes.</param>
         /// <returns>The original <see cref="TracingOptions"/> for chaining.</returns>
         public static TracingOptions Enable(this TracingOptions options, string? activitySourceName = null, string? listenerName = null, ActivitySourceScope scopes = ActivitySourceScope.Global | ActivitySourceScope.Local)
@@ -63,7 +63,7 @@ namespace Microsoft.Extensions.Diagnostics.Tracing
         /// </summary>
         /// <param name="builder">The <see cref="ITracingBuilder"/>.</param>
         /// <param name="activitySourceName">The <see cref="ActivitySource.Name"/> or prefix. A null value matches all activity sources.</param>
-        /// <param name="listenerName">The <see cref="IActivityListener"/>.Name. A null value matches all listeners.</param>
+        /// <param name="listenerName">The <see cref="IActivityListener.Name"/>. A null or empty value matches all listeners.</param>
         /// <param name="scopes">A bitwise combination of the enumeration values that specifies the scopes to consider. Defaults to all scopes.</param>
         /// <returns>The original <see cref="ITracingBuilder"/> for chaining.</returns>
         public static ITracingBuilder Disable(this ITracingBuilder builder, string? activitySourceName = null, string? listenerName = null, ActivitySourceScope scopes = ActivitySourceScope.Global | ActivitySourceScope.Local)
@@ -74,7 +74,7 @@ namespace Microsoft.Extensions.Diagnostics.Tracing
         /// </summary>
         /// <param name="options">The <see cref="TracingOptions"/>.</param>
         /// <param name="activitySourceName">The <see cref="ActivitySource.Name"/> or prefix. A null value matches all activity sources.</param>
-        /// <param name="listenerName">The <see cref="IActivityListener"/>.Name. A null value matches all listeners.</param>
+        /// <param name="listenerName">The <see cref="IActivityListener.Name"/>. A null or empty value matches all listeners.</param>
         /// <param name="scopes">A bitwise combination of the enumeration values that specifies the scopes to consider. Defaults to all scopes.</param>
         /// <returns>The original <see cref="TracingOptions"/> for chaining.</returns>
         public static TracingOptions Disable(this TracingOptions options, string? activitySourceName = null, string? listenerName = null, ActivitySourceScope scopes = ActivitySourceScope.Global | ActivitySourceScope.Local)

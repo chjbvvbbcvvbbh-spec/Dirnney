@@ -32,7 +32,7 @@ namespace Microsoft.Extensions.Diagnostics.Tracing
 
             if (options.Scope is not null && !ReferenceEquals(options.Scope, this))
             {
-                throw new InvalidOperationException(SR.InvalidScope);
+                throw new InvalidOperationException(SR.InvalidActivitySourceScope);
             }
 
             Debug.Assert(options.Name is not null);
@@ -191,10 +191,10 @@ namespace Microsoft.Extensions.Diagnostics.Tracing
 
             private bool ShouldListenTo(ActivitySource activitySource)
             {
-                return IsEnabled(activitySource) && IsEnabled(activitySource, _listener.Name);
+                return IsEnabled(activitySource, _listener.Name);
             }
 
-            private bool IsEnabled(ActivitySource activitySource, string listenerName = "")
+            private bool IsEnabled(ActivitySource activitySource, string listenerName)
             {
                 TracingRule? rule = GetMostSpecificRule(activitySource.Name, listenerName, ReferenceEquals(_activitySourceFactory, activitySource.Scope));
                 return rule?.Enabled ?? false;
@@ -218,7 +218,8 @@ namespace Microsoft.Extensions.Diagnostics.Tracing
 
             private static bool RuleMatches(TracingRule rule, string activitySourceName, string listenerName, bool isLocalScope)
             {
-                if (!string.Equals(rule.ListenerName ?? string.Empty, listenerName, StringComparison.OrdinalIgnoreCase))
+                if (!string.IsNullOrEmpty(rule.ListenerName)
+                    && !string.Equals(rule.ListenerName, listenerName, StringComparison.OrdinalIgnoreCase))
                 {
                     return false;
                 }
@@ -236,6 +237,15 @@ namespace Microsoft.Extensions.Diagnostics.Tracing
                 if (best is null)
                 {
                     return true;
+                }
+
+                if (!string.IsNullOrEmpty(rule.ListenerName) && string.IsNullOrEmpty(best.ListenerName))
+                {
+                    return true;
+                }
+                else if (string.IsNullOrEmpty(rule.ListenerName) && !string.IsNullOrEmpty(best.ListenerName))
+                {
+                    return false;
                 }
 
                 if (!string.IsNullOrEmpty(rule.ActivitySourceName))

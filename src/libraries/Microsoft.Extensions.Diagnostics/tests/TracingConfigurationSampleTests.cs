@@ -23,7 +23,6 @@ namespace Microsoft.Extensions.Diagnostics.Tests
                 .AddInMemoryCollection(new Dictionary<string, string?>
                 {
                     ["EnabledTracing:Default"] = "true",
-                    [$"{SampleListenerName}:EnabledTracing:Default"] = "true",
                 })
                 .Build();
 
@@ -51,7 +50,6 @@ namespace Microsoft.Extensions.Diagnostics.Tests
                 .AddInMemoryCollection(new Dictionary<string, string?>
                 {
                     ["EnabledTracing:Default"] = "true",
-                    [$"{SampleListenerName}:EnabledTracing:Default"] = "true",
                 })
                 .Build();
 
@@ -135,7 +133,6 @@ namespace Microsoft.Extensions.Diagnostics.Tests
                     ["EnabledGlobalTracing:Demo.ScopeSource"] = "true",
                     ["EnabledLocalTracing:Demo.ScopeSource"] = "false",
                     ["EnabledLocalTracing:Demo.LocalOnlySource"] = "true",
-                    [$"{SampleListenerName}:EnabledTracing:Default"] = "true",
                 })
                 .Build();
 
@@ -184,11 +181,103 @@ namespace Microsoft.Extensions.Diagnostics.Tests
             AssertActivityCreation(source, "AfterDisable", expectedCreated: false);
         }
 
+        [Theory]
+        [InlineData(null)]
+        [InlineData("")]
+        public void UnspecifiedListenerNameRuleMatchesNamedListener(string? listenerName)
+        {
+            var optionsMonitor = new TestActivityOptionsMonitor(CreateOptions(
+                new TracingRule("Demo.DefaultListenerBucket", listenerName, enabled: true)));
+
+            using var serviceProvider = new ServiceCollection()
+                .AddTracing(builder => builder.AddListener<SampleActivityListener>())
+                .Services
+                .AddSingleton<IOptionsMonitor<TracingOptions>>(optionsMonitor)
+                .BuildServiceProvider();
+
+            serviceProvider.GetRequiredService<IStartupValidator>().Validate();
+
+            using var source = new ActivitySource("Demo.DefaultListenerBucket");
+            AssertActivityCreation(source, "DefaultListenerBucketOperation", expectedCreated: true);
+        }
+
+        [Theory]
+        [InlineData(null)]
+        [InlineData("")]
+        public void ExplicitListenerNameDisableWinsOverUnspecifiedEnable(string? unspecifiedListenerName)
+        {
+            var optionsMonitor = new TestActivityOptionsMonitor(CreateOptions(
+                new TracingRule("Demo.ListenerSpecificDisable", listenerName: SampleListenerName, enabled: false),
+                new TracingRule("Demo.ListenerSpecificDisable", listenerName: unspecifiedListenerName, enabled: true)));
+
+            using var serviceProvider = new ServiceCollection()
+                .AddTracing(builder => builder.AddListener<SampleActivityListener>())
+                .Services
+                .AddSingleton<IOptionsMonitor<TracingOptions>>(optionsMonitor)
+                .BuildServiceProvider();
+
+            serviceProvider.GetRequiredService<IStartupValidator>().Validate();
+
+            using var source = new ActivitySource("Demo.ListenerSpecificDisable");
+            AssertActivityCreation(source, "ListenerSpecificDisableOperation", expectedCreated: false);
+        }
+
+        [Theory]
+        [InlineData(null)]
+        [InlineData("")]
+        public void ExplicitListenerNameEnableWinsOverUnspecifiedDisable(string? unspecifiedListenerName)
+        {
+            var optionsMonitor = new TestActivityOptionsMonitor(CreateOptions(
+                new TracingRule("Demo.ListenerSpecificEnable", listenerName: SampleListenerName, enabled: true),
+                new TracingRule("Demo.ListenerSpecificEnable", listenerName: unspecifiedListenerName, enabled: false)));
+
+            using var serviceProvider = new ServiceCollection()
+                .AddTracing(builder => builder.AddListener<SampleActivityListener>())
+                .Services
+                .AddSingleton<IOptionsMonitor<TracingOptions>>(optionsMonitor)
+                .BuildServiceProvider();
+
+            serviceProvider.GetRequiredService<IStartupValidator>().Validate();
+
+            using var source = new ActivitySource("Demo.ListenerSpecificEnable");
+            AssertActivityCreation(source, "ListenerSpecificEnableOperation", expectedCreated: true);
+        }
+
+        [Fact]
+        public void ActivitySourceFactoryCreate_WithInvalidScope_ThrowsTracingSpecificMessage()
+        {
+            using var serviceProvider = new ServiceCollection()
+                .AddTracing(builder => builder.AddListener<SampleActivityListener>())
+                .Services
+                .BuildServiceProvider();
+
+            IActivitySourceFactory activitySourceFactory = serviceProvider.GetRequiredService<IActivitySourceFactory>();
+
+            InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+                activitySourceFactory.Create(new ActivitySourceOptions("Demo.InvalidScopeSource")
+                {
+                    Scope = new object()
+                }));
+
+            Assert.Contains("activity source", ex.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("meter", ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+
         private static TracingOptions CreateOptions(string activitySourceName, bool enabled)
         {
+            return CreateOptions(
+                new TracingRule(activitySourceName, listenerName: null, enabled),
+                new TracingRule(activitySourceName, listenerName: SampleListenerName, enabled));
+        }
+
+        private static TracingOptions CreateOptions(params TracingRule[] rules)
+        {
             var options = new TracingOptions();
-            options.Rules.Add(new TracingRule(activitySourceName, listenerName: null, enabled));
-            options.Rules.Add(new TracingRule(activitySourceName, listenerName: SampleListenerName, enabled));
+            foreach (TracingRule rule in rules)
+            {
+                options.Rules.Add(rule);
+            }
+
             return options;
         }
 
