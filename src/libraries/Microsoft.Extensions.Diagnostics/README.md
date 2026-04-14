@@ -6,6 +6,17 @@ Commonly Used APIS:
 - MetricsServiceExtensions.AddMetrics(this IServiceCollection services)
 - MeterFactoryExtensions.Create(this IMeterFactory, string name, string? version = null, IEnumerable<KeyValuePair<string,object?>> tags = null,  object? scope = null)
 - MetricsBuilderConfigurationExtensions.AddConfiguration(this IMetricsBuilder builder, IConfiguration configuration)
+- TracingServiceExtensions.AddTracing(this IServiceCollection services)
+- TracingBuilderConfigurationExtensions.AddConfiguration(this ITracingBuilder builder, IConfiguration configuration)
+
+## Tracing configuration schema
+`TracingBuilderConfigurationExtensions.AddConfiguration` supports the following key shapes:
+
+- `EnabledTracing`, `EnabledGlobalTracing`, and `EnabledLocalTracing`
+- `{ListenerName}:EnabledTracing`, `{ListenerName}:EnabledGlobalTracing`, and `{ListenerName}:EnabledLocalTracing`
+- Within each section: `Default` or `{ActivitySourceName}`
+
+`EnabledTracing` is the scope-less/default-scope form and applies to both global and local activity sources. Tracing has no instrument-level child keys, so it does not support a nested `{ActivitySourceName}:Default` shape. Listener-specific rules are additional filters and do not override root-level rules. Values are `true`/`false` only. Activity source name patterns support at most one `*` wildcard.
 
 ## Contribution Bar
 - [x] [We consider new features, new APIs, bug fixes, and performance changes](https://github.com/dotnet/runtime/tree/main/src/libraries#contribution-bar)

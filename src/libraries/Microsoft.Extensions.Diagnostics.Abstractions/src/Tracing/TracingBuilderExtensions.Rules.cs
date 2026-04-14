@@ -18,10 +18,10 @@ namespace Microsoft.Extensions.Diagnostics.Tracing
         /// <param name="builder">The <see cref="ITracingBuilder"/>.</param>
         /// <param name="activitySourceName">The <see cref="ActivitySource.Name"/> or prefix. A null value matches all activity sources.</param>
         /// <param name="listenerName">The <see cref="IActivityListener"/>.Name. A null value matches all listeners.</param>
-        /// <param name="scopes">A bitwise combination of the enumeration values that specifies the scopes to consider.</param>
+        /// <param name="scopes">A bitwise combination of the enumeration values that specifies the scopes to consider. Defaults to all scopes.</param>
         /// <param name="enabled"><see langword="true"/> to enable matched activities; otherwise, <see langword="false"/>.</param>
         /// <returns>The original <see cref="ITracingBuilder"/> for chaining.</returns>
-        public static ITracingBuilder SetEnabled(this ITracingBuilder builder, bool enabled, string? activitySourceName = null, string? listenerName = null, ActivitySourceScope scopes = ActivitySourceScope.Local)
+        public static ITracingBuilder SetEnabled(this ITracingBuilder builder, bool enabled, string? activitySourceName = null, string? listenerName = null, ActivitySourceScope scopes = ActivitySourceScope.Global | ActivitySourceScope.Local)
             => builder.ConfigureRule(options => options.SetEnabled(enabled, activitySourceName, listenerName, scopes));
 
         /// <summary>
@@ -30,10 +30,10 @@ namespace Microsoft.Extensions.Diagnostics.Tracing
         /// <param name="options">The <see cref="TracingOptions"/>.</param>
         /// <param name="activitySourceName">The <see cref="ActivitySource.Name"/> or prefix. A null value matches all activity sources.</param>
         /// <param name="listenerName">The <see cref="IActivityListener"/>.Name. A null value matches all listeners.</param>
-        /// <param name="scopes">A bitwise combination of the enumeration values that specifies the scopes to consider.</param>
+        /// <param name="scopes">A bitwise combination of the enumeration values that specifies the scopes to consider. Defaults to all scopes.</param>
         /// <param name="enabled"><see langword="true"/> to enable matched activities; otherwise, <see langword="false"/>.</param>
         /// <returns>The original <see cref="TracingOptions"/> for chaining.</returns>
-        public static TracingOptions SetEnabled(this TracingOptions options, bool enabled, string? activitySourceName = null, string? listenerName = null, ActivitySourceScope scopes = ActivitySourceScope.Local)
+        public static TracingOptions SetEnabled(this TracingOptions options, bool enabled, string? activitySourceName = null, string? listenerName = null, ActivitySourceScope scopes = ActivitySourceScope.Global | ActivitySourceScope.Local)
             => options.AddRule(activitySourceName, listenerName, scopes, enabled);
 
         /// <summary>
@@ -42,9 +42,9 @@ namespace Microsoft.Extensions.Diagnostics.Tracing
         /// <param name="builder">The <see cref="ITracingBuilder"/>.</param>
         /// <param name="activitySourceName">The <see cref="ActivitySource.Name"/> or prefix. A null value matches all activity sources.</param>
         /// <param name="listenerName">The <see cref="IActivityListener"/>.Name. A null value matches all listeners.</param>
-        /// <param name="scopes">A bitwise combination of the enumeration values that specifies the scopes to consider.</param>
+        /// <param name="scopes">A bitwise combination of the enumeration values that specifies the scopes to consider. Defaults to all scopes.</param>
         /// <returns>The original <see cref="ITracingBuilder"/> for chaining.</returns>
-        public static ITracingBuilder Enable(this ITracingBuilder builder, string? activitySourceName = null, string? listenerName = null, ActivitySourceScope scopes = ActivitySourceScope.Local)
+        public static ITracingBuilder Enable(this ITracingBuilder builder, string? activitySourceName = null, string? listenerName = null, ActivitySourceScope scopes = ActivitySourceScope.Global | ActivitySourceScope.Local)
             => builder.SetEnabled(enabled: true, activitySourceName, listenerName, scopes);
 
         /// <summary>
@@ -53,9 +53,9 @@ namespace Microsoft.Extensions.Diagnostics.Tracing
         /// <param name="options">The <see cref="TracingOptions"/>.</param>
         /// <param name="activitySourceName">The <see cref="ActivitySource.Name"/> or prefix. A null value matches all activity sources.</param>
         /// <param name="listenerName">The <see cref="IActivityListener"/>.Name. A null value matches all listeners.</param>
-        /// <param name="scopes">A bitwise combination of the enumeration values that specifies the scopes to consider.</param>
+        /// <param name="scopes">A bitwise combination of the enumeration values that specifies the scopes to consider. Defaults to all scopes.</param>
         /// <returns>The original <see cref="TracingOptions"/> for chaining.</returns>
-        public static TracingOptions Enable(this TracingOptions options, string? activitySourceName = null, string? listenerName = null, ActivitySourceScope scopes = ActivitySourceScope.Local)
+        public static TracingOptions Enable(this TracingOptions options, string? activitySourceName = null, string? listenerName = null, ActivitySourceScope scopes = ActivitySourceScope.Global | ActivitySourceScope.Local)
             => options.SetEnabled(true, activitySourceName, listenerName, scopes);
 
         /// <summary>
@@ -64,9 +64,9 @@ namespace Microsoft.Extensions.Diagnostics.Tracing
         /// <param name="builder">The <see cref="ITracingBuilder"/>.</param>
         /// <param name="activitySourceName">The <see cref="ActivitySource.Name"/> or prefix. A null value matches all activity sources.</param>
         /// <param name="listenerName">The <see cref="IActivityListener"/>.Name. A null value matches all listeners.</param>
-        /// <param name="scopes">A bitwise combination of the enumeration values that specifies the scopes to consider.</param>
+        /// <param name="scopes">A bitwise combination of the enumeration values that specifies the scopes to consider. Defaults to all scopes.</param>
         /// <returns>The original <see cref="ITracingBuilder"/> for chaining.</returns>
-        public static ITracingBuilder Disable(this ITracingBuilder builder, string? activitySourceName = null, string? listenerName = null, ActivitySourceScope scopes = ActivitySourceScope.Local)
+        public static ITracingBuilder Disable(this ITracingBuilder builder, string? activitySourceName = null, string? listenerName = null, ActivitySourceScope scopes = ActivitySourceScope.Global | ActivitySourceScope.Local)
             => builder.SetEnabled(false, activitySourceName, listenerName, scopes);
 
         /// <summary>
@@ -75,9 +75,9 @@ namespace Microsoft.Extensions.Diagnostics.Tracing
         /// <param name="options">The <see cref="TracingOptions"/>.</param>
         /// <param name="activitySourceName">The <see cref="ActivitySource.Name"/> or prefix. A null value matches all activity sources.</param>
         /// <param name="listenerName">The <see cref="IActivityListener"/>.Name. A null value matches all listeners.</param>
-        /// <param name="scopes">A bitwise combination of the enumeration values that specifies the scopes to consider.</param>
+        /// <param name="scopes">A bitwise combination of the enumeration values that specifies the scopes to consider. Defaults to all scopes.</param>
         /// <returns>The original <see cref="TracingOptions"/> for chaining.</returns>
-        public static TracingOptions Disable(this TracingOptions options, string? activitySourceName = null, string? listenerName = null, ActivitySourceScope scopes = ActivitySourceScope.Local)
+        public static TracingOptions Disable(this TracingOptions options, string? activitySourceName = null, string? listenerName = null, ActivitySourceScope scopes = ActivitySourceScope.Global | ActivitySourceScope.Local)
             => options.SetEnabled(false, activitySourceName, listenerName, scopes);
 
         private static ITracingBuilder ConfigureRule(this ITracingBuilder builder, Action<TracingOptions> configureOptions)

@@ -18,6 +18,14 @@ namespace Microsoft.Extensions.Diagnostics.Tracing
         /// Reads tracing configuration from the provided <see cref="IConfiguration"/> section and configures
         /// which <see cref="ActivitySource"/> and <see cref="Activity"/> instances are enabled.
         /// </summary>
+        /// <remarks>
+        /// <para>The configuration key shapes follow the metrics model, except tracing stops at the <see cref="ActivitySource.Name"/> level and has no instrument-level child keys.</para>
+        /// <para>- Section names: <c>EnabledTracing</c> (both global and local), <c>EnabledGlobalTracing</c>, and <c>EnabledLocalTracing</c>, plus the listener-specific forms <c>{ListenerName}:...</c>.</para>
+        /// <para>- Within each section, supported entries are <c>Default</c> and <see cref="ActivitySource.Name"/>. Unlike metrics, tracing does not support a nested <c>{ActivitySourceName}:Default</c> form because there is no level below the activity source.</para>
+        /// <para>- Listener-specific rules are evaluated in addition to root-level rules; they filter further and do not override a disabled root-level match.</para>
+        /// <para>- Values are Boolean only: <c>true</c> enables and <c>false</c> disables.</para>
+        /// <para>Example keys: <c>EnabledTracing:Default=true</c>, <c>EnabledGlobalTracing:MyCompany.Service=false</c>, and <c>MyListener:EnabledLocalTracing:MyCompany.Service=true</c>.</para>
+        /// </remarks>
         /// <param name="builder">The <see cref="ITracingBuilder"/>.</param>
         /// <param name="configuration">The <see cref="IConfiguration"/> section to load.</param>
         /// <returns>The original <see cref="ITracingBuilder"/> for chaining.</returns>

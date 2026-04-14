@@ -113,14 +113,14 @@ namespace Microsoft.Extensions.Diagnostics.Tracing
         public static ITracingBuilder AddListener(this ITracingBuilder builder, IActivityListener listener) { throw null!; }
         public static ITracingBuilder ClearListeners(this ITracingBuilder builder) { throw null!; }
 
-        public static ITracingBuilder SetEnabled(this ITracingBuilder builder, bool enabled, string? activitySourceName = null, string? listenerName = null, ActivitySourceScope scopes = ActivitySourceScope.Local) => throw null!;
-        public static TracingOptions SetEnabled(this TracingOptions options, bool enabled, string? activitySourceName = null, string? listenerName = null, ActivitySourceScope scopes = ActivitySourceScope.Local) => throw null!;
+        public static ITracingBuilder SetEnabled(this ITracingBuilder builder, bool enabled, string? activitySourceName = null, string? listenerName = null, ActivitySourceScope scopes = ActivitySourceScope.Global | ActivitySourceScope.Local) => throw null!;
+        public static TracingOptions SetEnabled(this TracingOptions options, bool enabled, string? activitySourceName = null, string? listenerName = null, ActivitySourceScope scopes = ActivitySourceScope.Global | ActivitySourceScope.Local) => throw null!;
 
-        public static ITracingBuilder Enable(this ITracingBuilder builder, string? activitySourceName = null, string? listenerName = null, ActivitySourceScope scopes = ActivitySourceScope.Local) => throw null!;
-        public static TracingOptions Enable(this TracingOptions options, string? activitySourceName = null, string? listenerName = null, ActivitySourceScope scopes = ActivitySourceScope.Local) => throw null!;
+        public static ITracingBuilder Enable(this ITracingBuilder builder, string? activitySourceName = null, string? listenerName = null, ActivitySourceScope scopes = ActivitySourceScope.Global | ActivitySourceScope.Local) => throw null!;
+        public static TracingOptions Enable(this TracingOptions options, string? activitySourceName = null, string? listenerName = null, ActivitySourceScope scopes = ActivitySourceScope.Global | ActivitySourceScope.Local) => throw null!;
 
-        public static ITracingBuilder Disable(this ITracingBuilder builder, string? activitySourceName = null, string? listenerName = null, ActivitySourceScope scopes = ActivitySourceScope.Local) => throw null!;
-        public static TracingOptions Disable(this TracingOptions options, string? activitySourceName = null, string? listenerName = null, ActivitySourceScope scopes = ActivitySourceScope.Local) => throw null!;
+        public static ITracingBuilder Disable(this ITracingBuilder builder, string? activitySourceName = null, string? listenerName = null, ActivitySourceScope scopes = ActivitySourceScope.Global | ActivitySourceScope.Local) => throw null!;
+        public static TracingOptions Disable(this TracingOptions options, string? activitySourceName = null, string? listenerName = null, ActivitySourceScope scopes = ActivitySourceScope.Global | ActivitySourceScope.Local) => throw null!;
     }
     public class TracingOptions
     {

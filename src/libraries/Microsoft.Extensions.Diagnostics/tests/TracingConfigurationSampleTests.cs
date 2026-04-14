@@ -132,9 +132,9 @@ namespace Microsoft.Extensions.Diagnostics.Tests
                 .AddInMemoryCollection(new Dictionary<string, string?>
                 {
                     ["EnabledTracing:Default"] = "false",
-                    ["EnabledGlobalTracing:Demo.ScopeSource:Default"] = "true",
-                    ["EnabledLocalTracing:Demo.ScopeSource:Default"] = "false",
-                    ["EnabledLocalTracing:Demo.LocalOnlySource:Default"] = "true",
+                    ["EnabledGlobalTracing:Demo.ScopeSource"] = "true",
+                    ["EnabledLocalTracing:Demo.ScopeSource"] = "false",
+                    ["EnabledLocalTracing:Demo.LocalOnlySource"] = "true",
                     [$"{SampleListenerName}:EnabledTracing:Default"] = "true",
                 })
                 .Build();
@@ -158,27 +158,6 @@ namespace Microsoft.Extensions.Diagnostics.Tests
             AssertActivityCreation(localScopeSource, "AllowedOperation", expectedCreated: false);
             AssertActivityCreation(localOnlySource, "LocalOnlyOperation", expectedCreated: true);
             AssertActivityCreation(blockedSource, "AllowedOperation", expectedCreated: false);
-        }
-
-        [Fact]
-        public void LegacySamplingValuesMapToEnabledRules()
-        {
-            var configuration = new ConfigurationBuilder()
-                .AddInMemoryCollection(new Dictionary<string, string?>
-                {
-                    ["EnabledTracing:SourceA"] = "AllData",
-                    ["EnabledTracing:SourceB"] = "None",
-                })
-                .Build();
-
-            using var serviceProvider = new ServiceCollection()
-                .AddTracing(builder => builder.AddConfiguration(configuration))
-                .Services
-                .BuildServiceProvider();
-
-            var options = serviceProvider.GetRequiredService<IOptions<TracingOptions>>().Value;
-            Assert.Contains(options.Rules, r => r.ActivitySourceName == "SourceA" && r.Enabled);
-            Assert.Contains(options.Rules, r => r.ActivitySourceName == "SourceB" && !r.Enabled);
         }
 
         [Fact]

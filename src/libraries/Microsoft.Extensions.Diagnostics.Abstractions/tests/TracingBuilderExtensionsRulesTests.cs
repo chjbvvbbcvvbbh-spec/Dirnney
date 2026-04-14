@@ -30,7 +30,7 @@ namespace Microsoft.Extensions.Diagnostics.Tests
             var rule = Assert.Single(instance.Rules);
             Assert.Equal(activitySourceName, rule.ActivitySourceName);
             Assert.Null(rule.ListenerName);
-            Assert.Equal(ActivitySourceScope.Local, rule.Scopes);
+            Assert.Equal(ActivitySourceScope.Global | ActivitySourceScope.Local, rule.Scopes);
             Assert.True(rule.Enabled);
         }
 
@@ -71,7 +71,7 @@ namespace Microsoft.Extensions.Diagnostics.Tests
             var rule = Assert.Single(instance.Rules);
             Assert.Equal(activitySourceName, rule.ActivitySourceName);
             Assert.Null(rule.ListenerName);
-            Assert.Equal(ActivitySourceScope.Local, rule.Scopes);
+            Assert.Equal(ActivitySourceScope.Global | ActivitySourceScope.Local, rule.Scopes);
             Assert.True(rule.Enabled);
         }
 

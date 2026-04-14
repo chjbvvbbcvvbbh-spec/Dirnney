@@ -185,7 +185,7 @@ namespace Microsoft.Extensions.Diagnostics.Tracing
                     }
 
                     Volatile.Write(ref _rules, rules);
-                    ActivitySource.UpdateActivityListener(_activityListener);
+                    ActivitySource.ResetSourceFilters(_activityListener);
                 }
             }
 

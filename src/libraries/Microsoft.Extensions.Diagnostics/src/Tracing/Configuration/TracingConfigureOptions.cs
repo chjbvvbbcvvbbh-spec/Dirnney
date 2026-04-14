@@ -87,23 +87,6 @@ namespace Microsoft.Extensions.Diagnostics.Tracing
                 return true;
             }
 
-            if (Enum.TryParse<ActivitySamplingResult>(activitySourceSection.Value, ignoreCase: true, out var mode))
-            {
-                enabled = mode != ActivitySamplingResult.None;
-                return true;
-            }
-
-            if (bool.TryParse(activitySourceSection[DefaultKey], out enabled))
-            {
-                return true;
-            }
-
-            if (Enum.TryParse<ActivitySamplingResult>(activitySourceSection[DefaultKey], ignoreCase: true, out mode))
-            {
-                enabled = mode != ActivitySamplingResult.None;
-                return true;
-            }
-
             enabled = default;
             return false;
         }
