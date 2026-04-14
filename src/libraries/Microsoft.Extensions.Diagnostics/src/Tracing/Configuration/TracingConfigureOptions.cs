@@ -43,19 +43,19 @@ namespace Microsoft.Extensions.Diagnostics.Tracing
                 {
                     var listenerName = configurationSection.Key;
                     var enabledTracingSection = configurationSection.GetSection(EnabledTracingKey);
-                    if (enabledTracingSection != null)
+                    if (enabledTracingSection.Exists())
                     {
                         LoadActivitySourceRules(options, enabledTracingSection, ActivitySourceScope.Global | ActivitySourceScope.Local, listenerName);
                     }
 
                     var enabledGlobalTracingSection = configurationSection.GetSection(EnabledGlobalTracingKey);
-                    if (enabledGlobalTracingSection != null)
+                    if (enabledGlobalTracingSection.Exists())
                     {
                         LoadActivitySourceRules(options, enabledGlobalTracingSection, ActivitySourceScope.Global, listenerName);
                     }
 
                     var enabledLocalTracingSection = configurationSection.GetSection(EnabledLocalTracingKey);
-                    if (enabledLocalTracingSection != null)
+                    if (enabledLocalTracingSection.Exists())
                     {
                         LoadActivitySourceRules(options, enabledLocalTracingSection, ActivitySourceScope.Local, listenerName);
                     }
