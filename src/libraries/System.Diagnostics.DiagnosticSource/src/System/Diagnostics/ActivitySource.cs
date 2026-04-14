@@ -370,7 +370,7 @@ namespace System.Diagnostics
         }
 
         /// <summary>
-        /// Update the <see cref="ActivityListener"/> object to start or stop listening to the <see cref="Activity"/> events based on the listener configuration.
+        /// Resets source filters for the <see cref="ActivityListener"/> object to start or stop listening to the <see cref="Activity"/> events based on the listener configuration.
         /// </summary>
         /// <param name="listener">The <see cref="ActivityListener"/> instance whose configuration, in particular its <see cref="ActivityListener.ShouldListenTo"/> callback, determines which <see cref="ActivitySource"/> instances it should listen to.</param>
         public static void ResetSourceFilters(ActivityListener listener)

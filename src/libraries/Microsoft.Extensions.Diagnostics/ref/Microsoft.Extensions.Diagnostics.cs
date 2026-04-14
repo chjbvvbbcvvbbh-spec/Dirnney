@@ -31,7 +31,7 @@ namespace Microsoft.Extensions.Diagnostics.Metrics
 }
 namespace Microsoft.Extensions.Diagnostics.Tracing
 {
-    public static class TracingBuilderExtensions
+    public static class TracingBuilderConfigurationExtensions
     {
         public static ITracingBuilder AddConfiguration(this ITracingBuilder builder, Microsoft.Extensions.Configuration.IConfiguration configuration) => throw null!;
     }

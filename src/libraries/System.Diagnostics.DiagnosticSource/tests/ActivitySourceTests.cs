@@ -85,7 +85,7 @@ namespace System.Diagnostics.Tests
         }
 
         [ConditionalFact(typeof(RemoteExecutor), nameof(RemoteExecutor.IsSupported))]
-        public void TestUpdateActivityListenerUpdatesListenerState()
+        public void TestResetSourceFiltersUpdatesListenerState()
         {
             RemoteExecutor.Invoke(() => {
                 using ActivitySource source = new ActivitySource("ListenerUpdateSource");
@@ -104,7 +104,7 @@ namespace System.Diagnostics.Tests
                     SampleUsingParentId = (ref ActivityCreationOptions<string> options) => ActivitySamplingResult.AllDataAndRecorded,
                 };
 
-                Parallel.For(0, 16, _ => ActivitySource.UpdateActivityListener(listener));
+                Parallel.For(0, 16, _ => ActivitySource.ResetSourceFilters(listener));
                 Assert.True(source.HasListeners());
                 using (Activity? activity = source.StartActivity("enabled"))
                 {
@@ -117,7 +117,7 @@ namespace System.Diagnostics.Tests
                 Assert.Equal(1, stoppedCount);
 
                 Volatile.Write(ref shouldListen, 0);
-                Parallel.For(0, 16, _ => ActivitySource.UpdateActivityListener(listener));
+                Parallel.For(0, 16, _ => ActivitySource.ResetSourceFilters(listener));
                 Assert.False(source.HasListeners());
                 Assert.Null(source.StartActivity("disabled"));
                 Assert.Equal(1, startedCount);

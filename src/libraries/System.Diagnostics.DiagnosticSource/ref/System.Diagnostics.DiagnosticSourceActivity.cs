@@ -171,7 +171,7 @@ namespace System.Diagnostics
         public System.Diagnostics.Activity? StartActivity(string name, System.Diagnostics.ActivityKind kind, string? parentId, System.Collections.Generic.IEnumerable<System.Collections.Generic.KeyValuePair<string, object?>>? tags = null, System.Collections.Generic.IEnumerable<System.Diagnostics.ActivityLink>? links = null, System.DateTimeOffset startTime = default) { throw null; }
         public System.Diagnostics.Activity? StartActivity(System.Diagnostics.ActivityKind kind, System.Diagnostics.ActivityContext parentContext = default, System.Collections.Generic.IEnumerable<System.Collections.Generic.KeyValuePair<string, object?>>? tags = null, System.Collections.Generic.IEnumerable<System.Diagnostics.ActivityLink>? links = null, DateTimeOffset startTime = default, [System.Runtime.CompilerServices.CallerMemberName] string name = "") { throw null; }
         public static void AddActivityListener(System.Diagnostics.ActivityListener listener) { throw null; }
-        public static void UpdateActivityListener(System.Diagnostics.ActivityListener listener) { throw null; }
+        public static void ResetSourceFilters(System.Diagnostics.ActivityListener listener) { throw null; }
         public void Dispose() { throw null; }
         protected virtual void Dispose(bool disposing) { throw null; }
     }

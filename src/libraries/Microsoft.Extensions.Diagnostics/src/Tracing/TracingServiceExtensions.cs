@@ -62,7 +62,7 @@ namespace Microsoft.Extensions.DependencyInjection
         {
             public void Configure(NoOpOptions options)
             {
-                _ = factory.GetHashCode(); // Eagerly instantiate the factory so any constructor-based listener registration happens during startup.
+                GC.KeepAlive(factory); // Eagerly instantiate the factory so any constructor-based listener registration happens during startup.
             }
         }
     }
