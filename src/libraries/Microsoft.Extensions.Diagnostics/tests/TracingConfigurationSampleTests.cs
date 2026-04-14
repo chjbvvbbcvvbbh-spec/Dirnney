@@ -265,6 +265,25 @@ namespace Microsoft.Extensions.Diagnostics.Tests
         }
 
         [Fact]
+        public void ActivitySourceNamePatternWithMultipleWildcards_ThrowsTracingSpecificMessage()
+        {
+            var optionsMonitor = new TestActivityOptionsMonitor(CreateOptions(
+                new TracingRule("Demo*Wildcard*Source", listenerName: null, enabled: true)));
+
+            using var serviceProvider = new ServiceCollection()
+                .AddTracing(builder => builder.AddListener<SampleActivityListener>())
+                .Services
+                .AddSingleton<IOptionsMonitor<TracingOptions>>(optionsMonitor)
+                .BuildServiceProvider();
+
+            serviceProvider.GetRequiredService<IStartupValidator>().Validate();
+
+            InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() => new ActivitySource("DemoWildcardSource"));
+            Assert.Contains("activity source", ex.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("category", ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
         public void ActivitySourceFactoryCreate_RestoresScope_WhenActivitySourceCreationThrows()
         {
             using var serviceProvider = new ServiceCollection()

@@ -310,7 +310,7 @@ namespace Microsoft.Extensions.Diagnostics.Tracing
                 if (wildcardIndex >= 0 &&
                     pattern.IndexOf(WildcardChar, wildcardIndex + 1) >= 0)
                 {
-                    throw new InvalidOperationException(SR.MoreThanOneWildcard);
+                    throw new InvalidOperationException(SR.MoreThanOneWildcardActivitySourceName);
                 }
 
                 ReadOnlySpan<char> prefix;
