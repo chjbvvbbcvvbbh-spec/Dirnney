@@ -276,9 +276,8 @@ namespace Microsoft.Extensions.Diagnostics.Tests
                 .AddSingleton<IOptionsMonitor<TracingOptions>>(optionsMonitor)
                 .BuildServiceProvider();
 
-            serviceProvider.GetRequiredService<IStartupValidator>().Validate();
-
-            InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() => new ActivitySource("DemoWildcardSource"));
+            InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
+                () => serviceProvider.GetRequiredService<IStartupValidator>().Validate());
             Assert.Contains("activity source", ex.Message, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("category", ex.Message, StringComparison.OrdinalIgnoreCase);
         }

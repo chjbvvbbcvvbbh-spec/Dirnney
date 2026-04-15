@@ -359,13 +359,22 @@ namespace System.Diagnostics
 
             if (s_allListeners.AddIfNotExist(listener))
             {
-                s_activeSources.EnumWithAction((source, obj) => {
-                    var shouldListenTo = ((ActivityListener)obj).ShouldListenTo;
-                    if (shouldListenTo != null && shouldListenTo(source))
-                    {
-                        source.AddListener((ActivityListener)obj);
-                    }
-                }, listener);
+                try
+                {
+                    s_activeSources.EnumWithAction((source, obj) => {
+                        var shouldListenTo = ((ActivityListener)obj).ShouldListenTo;
+                        if (shouldListenTo != null && shouldListenTo(source))
+                        {
+                            source.AddListener((ActivityListener)obj);
+                        }
+                    }, listener);
+                }
+                catch
+                {
+                    s_allListeners.Remove(listener);
+                    s_activeSources.EnumWithAction((source, obj) => source.RemoveListener((ActivityListener)obj), listener);
+                    throw;
+                }
             }
         }
 
