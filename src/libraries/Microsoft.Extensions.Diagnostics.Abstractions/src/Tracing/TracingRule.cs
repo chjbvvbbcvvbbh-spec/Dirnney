@@ -21,7 +21,7 @@ namespace Microsoft.Extensions.Diagnostics.Tracing
         /// <summary>
         /// Initializes a new instance of the <see cref="TracingRule"/> class.
         /// </summary>
-        /// <param name="activitySourceName">The <see cref="ActivitySource.Name"/> or prefix.</param>
+        /// <param name="activitySourceName">The <see cref="ActivitySource.Name"/> or pattern with a single <c>*</c> wildcard.</param>
         /// <param name="listenerName">The <see cref="IActivityListener.Name"/>.</param>
         /// <param name="enabled"><see langword="true"/> to enable matched activities for this listener; otherwise, <see langword="false"/>.</param>
         public TracingRule(string? activitySourceName, string? listenerName, bool enabled)
