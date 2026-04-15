@@ -13,7 +13,7 @@ namespace Microsoft.Extensions.Diagnostics.Tracing
     internal sealed class DefaultActivitySourceFactory : IActivitySourceFactory
     {
         private readonly Dictionary<string, List<FactoryActivitySource>> _cachedSources = [];
-        private readonly List<ActivityListenerRegistration> _listenerRegistrations;
+        private readonly ActivityListenerRegistration[] _listenerRegistrations;
         private readonly IDisposable? _changeTokenRegistration;
         private bool _disposed;
 
@@ -79,25 +79,20 @@ namespace Microsoft.Extensions.Diagnostics.Tracing
 
         private void UpdateRules(TracingOptions options)
         {
-            lock (_cachedSources)
+            if (Volatile.Read(ref _disposed))
             {
-                if (_disposed)
-                {
-                    return;
-                }
+                return;
+            }
 
-                foreach (ActivityListenerRegistration registration in _listenerRegistrations)
-                {
-                    registration.UpdateRules(options.Rules);
-                }
+            IList<TracingRule> rules = options.Rules;
+            foreach (ActivityListenerRegistration registration in _listenerRegistrations)
+            {
+                registration.UpdateRules(rules);
             }
         }
 
         public void Dispose()
         {
-            List<ActivityListenerRegistration> listenerRegistrations;
-            List<FactoryActivitySource> sources;
-
             lock (_cachedSources)
             {
                 if (_disposed)
@@ -105,23 +100,21 @@ namespace Microsoft.Extensions.Diagnostics.Tracing
                     return;
                 }
 
-                _disposed = true;
+                Volatile.Write(ref _disposed, true);
                 _changeTokenRegistration?.Dispose();
-                listenerRegistrations = [.. _listenerRegistrations];
-                _listenerRegistrations.Clear();
-
-                sources = [.. _cachedSources.Values.SelectMany(static sourceList => sourceList)];
-                _cachedSources.Clear();
             }
 
-            foreach (ActivityListenerRegistration registration in listenerRegistrations)
+            foreach (ActivityListenerRegistration registration in _listenerRegistrations)
             {
                 registration.Dispose();
             }
 
-            foreach (FactoryActivitySource source in sources)
+            foreach (var entry in _cachedSources)
             {
-                source.Release();
+                foreach (var source in entry.Value)
+                {
+                    source.Release();
+                }
             }
         }
 

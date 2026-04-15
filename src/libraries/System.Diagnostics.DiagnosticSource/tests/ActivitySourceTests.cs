@@ -126,6 +126,56 @@ namespace System.Diagnostics.Tests
         }
 
         [ConditionalFact(typeof(RemoteExecutor), nameof(RemoteExecutor.IsSupported))]
+        public void TestDisposedSourceCannotBeResubscribed()
+        {
+            RemoteExecutor.Invoke(() => {
+                using (ActivitySource source = new ActivitySource("DisposeRaceSource_AddActivityListener"))
+                using (ActivityListener listener = new ActivityListener())
+                {
+                    listener.ShouldListenTo = activitySource =>
+                    {
+                        if (object.ReferenceEquals(source, activitySource))
+                        {
+                            source.Dispose();
+                            return true;
+                        }
+
+                        return false;
+                    };
+                    listener.SampleUsingParentId = (ref ActivityCreationOptions<string> options) => ActivitySamplingResult.AllDataAndRecorded;
+                    listener.Sample = (ref ActivityCreationOptions<ActivityContext> options) => ActivitySamplingResult.AllDataAndRecorded;
+
+                    ActivitySource.AddActivityListener(listener);
+
+                    Assert.False(source.HasListeners());
+                    Assert.Null(source.StartActivity("disposed"));
+                }
+
+                using (ActivitySource source = new ActivitySource("DisposeRaceSource_ResetSourceFilters"))
+                using (ActivityListener listener = new ActivityListener())
+                {
+                    listener.ShouldListenTo = activitySource =>
+                    {
+                        if (object.ReferenceEquals(source, activitySource))
+                        {
+                            source.Dispose();
+                            return true;
+                        }
+
+                        return false;
+                    };
+                    listener.SampleUsingParentId = (ref ActivityCreationOptions<string> options) => ActivitySamplingResult.AllDataAndRecorded;
+                    listener.Sample = (ref ActivityCreationOptions<ActivityContext> options) => ActivitySamplingResult.AllDataAndRecorded;
+
+                    ActivitySource.ResetSourceFilters(listener);
+
+                    Assert.False(source.HasListeners());
+                    Assert.Null(source.StartActivity("disposed"));
+                }
+            }).Dispose();
+        }
+
+        [ConditionalFact(typeof(RemoteExecutor), nameof(RemoteExecutor.IsSupported))]
         public void TestStartActivityWithNoListener()
         {
             RemoteExecutor.Invoke(() => {

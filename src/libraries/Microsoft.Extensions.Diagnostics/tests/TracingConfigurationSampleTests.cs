@@ -5,6 +5,8 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.Tracing;
@@ -182,6 +184,47 @@ namespace Microsoft.Extensions.Diagnostics.Tests
             AssertActivityCreation(source, "AfterDisable", expectedCreated: false);
         }
 
+        [Fact]
+        public void UpdateRules_DoesNotBlockCreateWhileResettingSourceFilters()
+        {
+            var blockingListener = new BlockingNameActivityListener();
+            var optionsMonitor = new TestActivityOptionsMonitor(CreateOptions("Demo.ReloadableSource", enabled: false));
+
+            using var serviceProvider = new ServiceCollection()
+                .AddTracing(builder => builder.AddListener(blockingListener))
+                .Services
+                .AddSingleton<IOptionsMonitor<TracingOptions>>(optionsMonitor)
+                .BuildServiceProvider();
+
+            serviceProvider.GetRequiredService<IStartupValidator>().Validate();
+            IActivitySourceFactory activitySourceFactory = serviceProvider.GetRequiredService<IActivitySourceFactory>();
+
+            using var existingSource = activitySourceFactory.Create("Demo.ReloadableSource");
+
+            Task updateTask = Task.Run(() =>
+            {
+                blockingListener.BlockCurrentThreadNameReads();
+                optionsMonitor.Set(CreateOptions("Demo.ReloadableSource", enabled: true));
+            });
+
+            Assert.True(blockingListener.WaitForNameRead(TimeSpan.FromSeconds(10)));
+
+            Task<ActivitySource> createTask = Task.Run(() => activitySourceFactory.Create("Demo.ConcurrentCreate"));
+            try
+            {
+                Assert.True(createTask.Wait(TimeSpan.FromSeconds(5)));
+                using ActivitySource createdSource = createTask.GetAwaiter().GetResult();
+                Assert.NotNull(createdSource);
+            }
+            finally
+            {
+                blockingListener.ReleaseNameRead();
+            }
+
+            Assert.True(updateTask.Wait(TimeSpan.FromSeconds(10)));
+            updateTask.GetAwaiter().GetResult();
+        }
+
         [Theory]
         [InlineData(null)]
         [InlineData("")]
@@ -339,6 +382,55 @@ namespace Microsoft.Extensions.Diagnostics.Tests
             public SampleActivity<string>? SampleUsingParentId => static (ref ActivityCreationOptions<string> options) => ActivitySamplingResult.AllDataAndRecorded;
 
             public SampleActivity<ActivityContext>? Sample => static (ref ActivityCreationOptions<ActivityContext> options) => ActivitySamplingResult.AllDataAndRecorded;
+
+            public void ActivityStarted(Activity activity)
+            {
+            }
+
+            public void ActivityStopped(Activity activity)
+            {
+            }
+
+            public void ActivityExceptionRecorded(Activity activity, Exception exception, ref TagList tags)
+            {
+            }
+        }
+
+        private sealed class BlockingNameActivityListener : IActivityListener
+        {
+            private readonly ManualResetEventSlim _nameReadStarted = new();
+            private readonly ManualResetEventSlim _allowNameRead = new();
+            private int _blockNameReads;
+            private int _blockedThreadId;
+
+            public string Name
+            {
+                get
+                {
+                    if (Volatile.Read(ref _blockNameReads) != 0
+                        && Volatile.Read(ref _blockedThreadId) == Environment.CurrentManagedThreadId)
+                    {
+                        _nameReadStarted.Set();
+                        _allowNameRead.Wait();
+                    }
+
+                    return nameof(BlockingNameActivityListener);
+                }
+            }
+
+            public SampleActivity<string>? SampleUsingParentId => static (ref ActivityCreationOptions<string> options) => ActivitySamplingResult.AllDataAndRecorded;
+
+            public SampleActivity<ActivityContext>? Sample => static (ref ActivityCreationOptions<ActivityContext> options) => ActivitySamplingResult.AllDataAndRecorded;
+
+            public void BlockCurrentThreadNameReads()
+            {
+                Volatile.Write(ref _blockedThreadId, Environment.CurrentManagedThreadId);
+                Volatile.Write(ref _blockNameReads, 1);
+            }
+
+            public bool WaitForNameRead(TimeSpan timeout) => _nameReadStarted.Wait(timeout);
+
+            public void ReleaseNameRead() => _allowNameRead.Set();
 
             public void ActivityStarted(Activity activity)
             {
