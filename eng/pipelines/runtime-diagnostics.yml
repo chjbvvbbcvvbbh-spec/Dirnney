@@ -262,7 +262,7 @@ extends:
         - template: /eng/pipelines/common/platform-matrix.yml
           parameters:
             jobTemplate: /eng/pipelines/common/global-build-job.yml
-            buildConfig: checked
+            buildConfig: release
             platforms: ${{ parameters.cdacDumpPlatforms }}
             shouldContinueOnError: true
             jobParameters:
@@ -306,7 +306,7 @@ extends:
         - template: /eng/pipelines/common/platform-matrix.yml
           parameters:
             jobTemplate: /eng/pipelines/common/global-build-job.yml
-            buildConfig: checked
+            buildConfig: release
             platforms: ${{ parameters.cdacDumpPlatforms }}
             shouldContinueOnError: true
             jobParameters:
@@ -353,7 +353,7 @@ extends:
         - template: /eng/pipelines/common/platform-matrix.yml
           parameters:
             jobTemplate: /eng/pipelines/common/global-build-job.yml
-            buildConfig: checked
+            buildConfig: release
             platforms: ${{ parameters.cdacDumpPlatforms }}
             shouldContinueOnError: true
             jobParameters:
