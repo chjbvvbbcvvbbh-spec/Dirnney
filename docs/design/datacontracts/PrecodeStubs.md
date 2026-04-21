@@ -339,10 +339,10 @@ After the initial precode type is determined, for stub precodes a refined precod
 
             TargetPointer dataAddr = instrPointer + MachineDescriptor.StubCodePageSize;
             Data.InterpreterPrecodeData precodeData = // read InterpreterPrecodeData at dataAddr
-            if (precodeData.ByteCodeAddr == null)
+            if (precodeData.ByteCodeAddr == TargetPointer.Null)
                 return entryPoint;
 
-            return precodeData.ByteCodeAddr;
+            return new TargetCodePointer(precodeData.ByteCodeAddr);
         }
         catch
         {

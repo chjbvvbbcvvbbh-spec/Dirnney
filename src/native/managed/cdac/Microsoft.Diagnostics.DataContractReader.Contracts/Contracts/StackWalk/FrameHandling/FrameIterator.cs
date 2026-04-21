@@ -241,7 +241,7 @@ internal sealed class FrameIterator
 
     /// <summary>
     /// Resolves the MethodDesc from a specific InterpMethodContextFrame by following:
-    /// InterpMethodContextFrame.StartIp -> InterpByteCodeStart.Method -> InterpMethod.methodHnd
+    /// InterpMethodContextFrame.StartIp -> InterpByteCodeStart.Method -> InterpMethod.MethodDesc
     /// </summary>
     internal static TargetPointer ResolveMethodDescFromInterpFrame(Target target, TargetPointer interpMethodFramePtr)
     {
