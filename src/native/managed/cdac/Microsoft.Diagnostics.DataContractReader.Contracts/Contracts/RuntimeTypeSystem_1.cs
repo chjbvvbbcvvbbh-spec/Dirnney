@@ -1681,6 +1681,12 @@ internal partial struct RuntimeTypeSystem_1 : IRuntimeTypeSystem
         return GetStableEntryPoint(md);
     }
 
+    TargetCodePointer IRuntimeTypeSystem.GetCodeForInterpreterOrJitted(MethodDescHandle methodDescHandle)
+    {
+        TargetCodePointer nativeCode = ((IRuntimeTypeSystem)this).GetNativeCode(methodDescHandle);
+        return _target.Contracts.PrecodeStubs.GetInterpreterCodeFromInterpreterPrecodeIfPresent(nativeCode);
+    }
+
     TargetCodePointer IRuntimeTypeSystem.GetMethodEntryPointIfExists(MethodDescHandle methodDescHandle)
     {
         MethodDesc md = _methodDescs[methodDescHandle.Address];

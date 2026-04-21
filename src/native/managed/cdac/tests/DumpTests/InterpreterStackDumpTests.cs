@@ -44,12 +44,9 @@ public class InterpreterStackDumpTests : DumpTestBase
         IExecutionManager executionManager = Target.Contracts.ExecutionManager;
 
         MethodDescHandle md = rts.GetMethodDescHandle(f.MethodDescPtr);
-        TargetCodePointer nativeCode = rts.GetNativeCode(md);
-        Assert.NotEqual(TargetCodePointer.Null, nativeCode);
+        TargetCodePointer resolvedCode = rts.GetCodeForInterpreterOrJitted(md);
+        Assert.NotEqual(TargetCodePointer.Null, resolvedCode);
 
-        // The native code address for interpreter methods is a precode address.
-        // Resolve it to the actual interpreter code address before looking up the code block.
-        TargetCodePointer resolvedCode = Target.Contracts.PrecodeStubs.GetInterpreterCodeFromInterpreterPrecodeIfPresent(nativeCode);
         CodeBlockHandle? codeBlock = executionManager.GetCodeBlockHandle(resolvedCode);
         Assert.NotNull(codeBlock);
         Assert.Equal(JitType.Interpreter, executionManager.GetJITType(codeBlock.Value));

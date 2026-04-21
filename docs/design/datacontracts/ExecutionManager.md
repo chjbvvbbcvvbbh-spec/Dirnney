@@ -263,34 +263,11 @@ The bulk of the work is done by the `GetCodeBlockHandle` API that maps a code po
     }
 ```
 
-There are two JIT managers: the "EE JitManager" for jitted code and "R2R JitManager" for ReadyToRun code.
+There are three JIT managers: the "EE JitManager" for jitted code, the "Interpreter JitManager" for interpreter code, and the "R2R JitManager" for ReadyToRun code.
 
-The EE JitManager `GetMethodInfo` implements the nibble map lookup, summarized below, followed by returning the `RealCodeHeader` data:
-
-```csharp
-bool GetMethodInfo(TargetPointer rangeSection, TargetCodePointer jittedCodeAddress, [NotNullWhen(true)] out CodeBlock? info)
-{
-    info = default;
-    TargetPointer start = // look up jittedCodeAddress in nibble map for rangeSection - see NibbleMap below
-    if (start == TargetPointer.Null)
-        return false;
-
-    TargetNUInt relativeOffset = jittedCodeAddress - start;
-    int codeHeaderOffset = Target.PointerSize;
-    TargetPointer codeHeaderIndirect = start - codeHeaderOffset;
-
-    // Check if address is in a stub code block
-    if (codeHeaderIndirect < Target.ReadGlobal<byte>("StubCodeBlockLast"))
-        return false;
-
-    TargetPointer codeHeaderAddress = Target.ReadPointer(codeHeaderIndirect);
-    TargetPointer methodDesc = Target.ReadPointer(codeHeaderAddress + /* RealCodeHeader::MethodDesc offset */);
-    info = new CodeBlock(jittedCodeAddress, realCodeHeader.MethodDesc, relativeOffset);
-    return true;
-}
-```
-
-The Interpreter JitManager `GetMethodInfo` uses the same nibble map lookup as the EE JitManager, but reads an `InterpreterRealCodeHeader` instead of a `RealCodeHeader`:
+The EE JitManager and Interpreter JitManager both use the same nibble map lookup to find method code.
+The only difference is which code header type is read: the EE JitManager reads a `RealCodeHeader` while the Interpreter JitManager reads an `InterpreterRealCodeHeader`.
+Their shared `GetMethodInfo` is summarized below:
 
 ```csharp
 bool GetMethodInfo(TargetPointer rangeSection, TargetCodePointer jittedCodeAddress, [NotNullWhen(true)] out CodeBlock? info)
@@ -309,8 +286,10 @@ bool GetMethodInfo(TargetPointer rangeSection, TargetCodePointer jittedCodeAddre
         return false;
 
     TargetPointer codeHeaderAddress = Target.ReadPointer(codeHeaderIndirect);
-    Data.InterpreterRealCodeHeader realCodeHeader = // read InterpreterRealCodeHeader at codeHeaderAddress
-    info = new CodeBlock(jittedCodeAddress, realCodeHeader.MethodDesc, relativeOffset);
+    // EE JitManager: read RealCodeHeader at codeHeaderAddress
+    // Interpreter JitManager: read InterpreterRealCodeHeader at codeHeaderAddress
+    TargetPointer methodDesc = // read MethodDesc field from the appropriate code header
+    info = new CodeBlock(jittedCodeAddress, methodDesc, relativeOffset);
     return true;
 }
 ```

@@ -214,6 +214,14 @@ public interface IRuntimeTypeSystem : IContract
     TargetPointer GetMethodDescVersioningState(MethodDescHandle methodDesc) => throw new NotImplementedException();
 
     TargetCodePointer GetNativeCode(MethodDescHandle methodDesc) => throw new NotImplementedException();
+
+    /// <summary>
+    /// Returns the jitted or interpreter code address for the given method.
+    /// If the method has an interpreter precode, resolves it to the actual interpreter code address.
+    /// Mirrors MethodDesc::GetCodeForInterpreterOrJitted() in the runtime.
+    /// </summary>
+    TargetCodePointer GetCodeForInterpreterOrJitted(MethodDescHandle methodDesc) => throw new NotImplementedException();
+
     TargetCodePointer GetMethodEntryPointIfExists(MethodDescHandle methodDesc) => throw new NotImplementedException();
 
     ushort GetSlotNumber(MethodDescHandle methodDesc) => throw new NotImplementedException();

@@ -165,11 +165,6 @@ public class FrameIteratorTests
         helpers.WritePointer(frameFrag.Data.AsSpan(frameNextOffset, pointerSize), terminator);
         helpers.WritePointer(frameFrag.Data.AsSpan(topContextFrameOffset, pointerSize), contextFrameFrag.Address);
 
-        builder.MemoryBuilder.AddHeapFragment(interpMethodFrag);
-        builder.MemoryBuilder.AddHeapFragment(byteCodeStartFrag);
-        builder.MemoryBuilder.AddHeapFragment(contextFrameFrag);
-        builder.MemoryBuilder.AddHeapFragment(frameFrag);
-
         builder.AddGlobals(("InterpreterFrameIdentifier", interpreterFrameIdentifierValue));
 
         var target = builder.Build();
@@ -204,7 +199,6 @@ public class FrameIteratorTests
         helpers.WritePointer(frameFrag.Data.AsSpan(frameNextOffset, pointerSize), terminator);
         helpers.WritePointer(frameFrag.Data.AsSpan(topContextFrameOffset, pointerSize), 0);
 
-        builder.MemoryBuilder.AddHeapFragment(frameFrag);
         builder.AddGlobals(("InterpreterFrameIdentifier", interpreterFrameIdentifierValue));
 
         var target = builder.Build();
@@ -247,8 +241,6 @@ public class FrameIteratorTests
         helpers.WritePointer(frameFrag.Data.AsSpan(frameNextOffset, pointerSize), terminator);
         helpers.WritePointer(frameFrag.Data.AsSpan(topContextFrameOffset, pointerSize), contextFrameFrag.Address);
 
-        builder.MemoryBuilder.AddHeapFragment(contextFrameFrag);
-        builder.MemoryBuilder.AddHeapFragment(frameFrag);
         builder.AddGlobals(("InterpreterFrameIdentifier", interpreterFrameIdentifierValue));
 
         var target = builder.Build();
@@ -296,9 +288,6 @@ public class FrameIteratorTests
         helpers.WritePointer(frameFrag.Data.AsSpan(frameNextOffset, pointerSize), terminator);
         helpers.WritePointer(frameFrag.Data.AsSpan(topContextFrameOffset, pointerSize), contextFrameFrag.Address);
 
-        builder.MemoryBuilder.AddHeapFragment(byteCodeStartFrag);
-        builder.MemoryBuilder.AddHeapFragment(contextFrameFrag);
-        builder.MemoryBuilder.AddHeapFragment(frameFrag);
         builder.AddGlobals(("InterpreterFrameIdentifier", interpreterFrameIdentifierValue));
 
         var target = builder.Build();
@@ -353,9 +342,6 @@ public class FrameIteratorTests
         var contextFrameA = CreateContextChainEntry(methodDescA, 0, out var interpMethodA, out var byteCodeStartA);
         var contextFrameB = CreateContextChainEntry(methodDescB, contextFrameA.Address, out var interpMethodB, out var byteCodeStartB);
         var contextFrameC = CreateContextChainEntry(methodDescC, contextFrameB.Address, out var interpMethodC, out var byteCodeStartC);
-
-        foreach (var frag in new[] { interpMethodA, byteCodeStartA, contextFrameA, interpMethodB, byteCodeStartB, contextFrameB, interpMethodC, byteCodeStartC, contextFrameC })
-            builder.MemoryBuilder.AddHeapFragment(frag);
 
         var target = builder.Build();
 

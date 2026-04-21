@@ -671,7 +671,7 @@ public class ExecutionManagerTests
 
     [Theory]
     [MemberData(nameof(StdArchAllVersions))]
-    public void GetMethodDesc_InterpreterOneMethod(int version, MockTarget.Architecture arch)
+    public void GetMethodDesc_InterpreterOneMethod(string version, MockTarget.Architecture arch)
     {
         const ulong codeRangeStart = 0x0a0a_0000u;
         const uint codeRangeSize = 0xc000u;
@@ -713,7 +713,7 @@ public class ExecutionManagerTests
 
     [Theory]
     [MemberData(nameof(StdArchAllVersions))]
-    public void GetCodeBlockHandle_InterpreterPrecode_ReturnsNull(int version, MockTarget.Architecture arch)
+    public void GetCodeBlockHandle_InterpreterPrecode_ReturnsNull(string version, MockTarget.Architecture arch)
     {
         const ulong precodeRangeStart = 0x0b0b_0000u;
         const uint precodeRangeSize = 0x1000u;

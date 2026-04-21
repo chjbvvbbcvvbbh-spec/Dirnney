@@ -448,20 +448,17 @@ public class PrecodeStubsTests
             var interpMethodTypeInfo = Types[DataType.InterpMethod];
 
             MockMemorySpace.HeapFragment interpMethodFragment = StubDataPageAllocator.Allocate((ulong)interpMethodTypeInfo.Size, $"InterpMethod for {name}");
-            Builder.AddHeapFragment(interpMethodFragment);
             Span<byte> interpMethodData = Builder.BorrowAddressRange(interpMethodFragment.Address, (int)interpMethodTypeInfo.Size);
             Builder.TargetTestHelpers.WritePointer(interpMethodData.Slice(interpMethodTypeInfo.Fields[nameof(Data.InterpMethod.MethodDesc)].Offset, Builder.TargetTestHelpers.PointerSize), methodDesc);
 
             MockMemorySpace.HeapFragment byteCodeStartFragment = StubDataPageAllocator.Allocate((ulong)interpByteCodeStartTypeInfo.Size, $"InterpByteCodeStart for {name}");
-            Builder.AddHeapFragment(byteCodeStartFragment);
             Span<byte> byteCodeStartData = Builder.BorrowAddressRange(byteCodeStartFragment.Address, (int)interpByteCodeStartTypeInfo.Size);
             Builder.TargetTestHelpers.WritePointer(byteCodeStartData.Slice(interpByteCodeStartTypeInfo.Fields[nameof(Data.InterpByteCodeStart.Method)].Offset, Builder.TargetTestHelpers.PointerSize), interpMethodFragment.Address);
 
             ulong stubCodeSize = (ulong)Math.Max(_v3StubBytes!.Length, (int)interpPrecodeTypeInfo.Size);
             MockMemorySpace.HeapFragment stubDataFragment = StubDataPageAllocator.Allocate(Math.Max((ulong)interpPrecodeTypeInfo.Size, stubCodeSize), $"Interp precode data for {name}");
-            Builder.AddHeapFragment(stubDataFragment);
 
-            ulong stubCodeStart = stubDataFragment.Address - stubCodePageSize;
+            ulong stubCodeStart= stubDataFragment.Address - stubCodePageSize;
             MockMemorySpace.HeapFragment stubCodeFragment = new MockMemorySpace.HeapFragment
             {
                 Address = stubCodeStart,
