@@ -44,7 +44,8 @@ public class InterpreterStackDumpTests : DumpTestBase
         IExecutionManager executionManager = Target.Contracts.ExecutionManager;
 
         MethodDescHandle md = rts.GetMethodDescHandle(f.MethodDescPtr);
-        TargetCodePointer resolvedCode = rts.GetCodeForInterpreterOrJitted(md);
+        TargetCodePointer nativeCode = rts.GetNativeCode(md);
+        TargetCodePointer resolvedCode = Target.Contracts.PrecodeStubs.GetInterpreterCodeFromInterpreterPrecodeIfPresent(nativeCode);
         Assert.NotEqual(TargetCodePointer.Null, resolvedCode);
 
         CodeBlockHandle? codeBlock = executionManager.GetCodeBlockHandle(resolvedCode);

@@ -2206,9 +2206,6 @@ public sealed unsafe partial class SOSDacImpl
         return _target.ReadPointer(pThunk + 2);
     }
 
-    private TargetCodePointer ResolveInterpreterPrecode(TargetCodePointer nativeCode)
-        => _target.Contracts.PrecodeStubs.GetInterpreterCodeFromInterpreterPrecodeIfPresent(nativeCode);
-
     int ISOSDacInterface.GetJumpThunkTarget(void* ctx, ClrDataAddress* targetIP, ClrDataAddress* targetMD)
     {
         int hr = HResults.S_OK;
@@ -2311,7 +2308,7 @@ public sealed unsafe partial class SOSDacImpl
             if (nativeCodeAddr != TargetCodePointer.Null)
             {
                 data->bHasNativeCode = 1;
-                data->NativeCodeAddr = ResolveInterpreterPrecode(nativeCodeAddr).ToAddress(_target).ToClrDataAddress(_target);
+                data->NativeCodeAddr = _target.Contracts.PrecodeStubs.GetInterpreterCodeFromInterpreterPrecodeIfPresent(nativeCodeAddr).ToAddress(_target).ToClrDataAddress(_target);
             }
             else
             {
@@ -2524,7 +2521,7 @@ public sealed unsafe partial class SOSDacImpl
 
         pReJitData->rejitID = rejit.GetRejitId(ilCodeVersion).Value;
         TargetCodePointer nativeCode = cv.GetNativeCode(nativeCodeVersion);
-        pReJitData->NativeCodeAddr = ResolveInterpreterPrecode(nativeCode).Value;
+        pReJitData->NativeCodeAddr = _target.Contracts.PrecodeStubs.GetInterpreterCodeFromInterpreterPrecodeIfPresent(nativeCode).Value;
 
         if (nativeCodeVersion.CodeVersionNodeAddress != activeNativeCodeVersion.CodeVersionNodeAddress ||
             nativeCodeVersion.MethodDescAddress != activeNativeCodeVersion.MethodDescAddress)
@@ -5223,7 +5220,7 @@ public sealed unsafe partial class SOSDacImpl
             int count = 0;
             foreach (NativeCodeVersionHandle nativeCodeVersionHandle in codeVersions.GetNativeCodeVersions(methodDescPtr, ilCodeVersionHandle))
             {
-                TargetCodePointer nativeCode = ResolveInterpreterPrecode(codeVersions.GetNativeCode(nativeCodeVersionHandle));
+                TargetCodePointer nativeCode = _target.Contracts.PrecodeStubs.GetInterpreterCodeFromInterpreterPrecodeIfPresent(codeVersions.GetNativeCode(nativeCodeVersionHandle));
                 TargetPointer nativeCodeAddr = nativeCode.ToAddress(_target);
                 nativeCodeAddrs[count].nativeCodeAddr = nativeCodeAddr.ToClrDataAddress(_target);
                 nativeCodeAddrs[count].nativeCodeVersionNodePtr = nativeCodeVersionHandle.CodeVersionNodeAddress.ToClrDataAddress(_target);

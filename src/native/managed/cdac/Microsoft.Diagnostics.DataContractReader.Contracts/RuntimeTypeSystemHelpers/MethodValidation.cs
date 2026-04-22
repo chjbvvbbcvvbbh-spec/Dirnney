@@ -221,7 +221,7 @@ internal sealed class MethodValidation
                     // The NativeCodeSlot may point to a precode or portable entry point
                     // (e.g., interpreter methods with FEATURE_PORTABLE_ENTRYPOINTS).
                     // Try resolving via precode stubs as a fallback.
-                    // See usage of GetCodeForInterpreterOrJitted in DacValidateMD for more details.
+                    // See DacValidateMD for more details.
                     Contracts.IPrecodeStubs precode = _target.Contracts.PrecodeStubs;
                     TargetPointer methodDesc = precode.GetMethodDescFromStubAddress(jitCodeAddr);
                     if (methodDesc != methodDescPointer)
