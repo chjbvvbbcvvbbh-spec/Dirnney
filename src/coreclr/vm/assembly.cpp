@@ -22,14 +22,12 @@
 #include "reflectclasswriter.h"
 #include "comdynamic.h"
 
-#include "sha1.h"
 
 #include "eeconfig.h"
 
 #include "assemblynative.hpp"
 #include "threadsuspend.h"
 
-#include "appdomainnative.hpp"
 #include "customattribute.h"
 
 #include "caparser.h"
@@ -1934,7 +1932,6 @@ void Assembly::EnsureLoadLevel(FileLoadLevel targetLevel)
     RETURN;
 }
 
-#include <optdefault.h>
 CHECK Assembly::CheckLoadLevel(FileLoadLevel requiredLevel, BOOL deadlockOK)
 {
     CONTRACTL
