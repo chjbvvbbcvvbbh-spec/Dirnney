@@ -639,6 +639,8 @@ internal partial class StackWalk_1 : IStackWalk
         switch (handle.State)
         {
             case StackWalkState.SW_FRAMELESS:
+                TargetPointer prevIP = handle.Context.InstructionPointer;
+                TargetPointer prevSP = handle.Context.StackPointer;
                 try
                 {
                     handle.Context.Unwind(_target);
@@ -647,6 +649,20 @@ internal partial class StackWalk_1 : IStackWalk
                 {
                     handle.State = StackWalkState.SW_ERROR;
                     throw;
+                }
+                // Guard against infinite loops when Unwind fails to advance.
+                // If both IP and SP are unchanged, the unwinder made no progress.
+                // Fall back to the Frame chain if possible, otherwise complete.
+                if (handle.Context.InstructionPointer == prevIP
+                    && handle.Context.StackPointer == prevSP)
+                {
+                    if (handle.FrameIter.IsValid())
+                    {
+                        handle.State = StackWalkState.SW_FRAME;
+                        return true;
+                    }
+                    handle.State = StackWalkState.SW_COMPLETE;
+                    return false;
                 }
                 break;
             case StackWalkState.SW_SKIPPED_FRAME:
