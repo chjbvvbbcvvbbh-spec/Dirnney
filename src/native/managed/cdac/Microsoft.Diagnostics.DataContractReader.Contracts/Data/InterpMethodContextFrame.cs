@@ -13,8 +13,12 @@ internal sealed class InterpMethodContextFrame : IData<InterpMethodContextFrame>
         Target.TypeInfo type = target.GetTypeInfo(DataType.InterpMethodContextFrame);
         StartIp = target.ReadPointerField(address, type, nameof(StartIp));
         ParentPtr = target.ReadPointerField(address, type, nameof(ParentPtr));
+        Ip = target.ReadPointerField(address, type, nameof(Ip));
+        NextPtr = target.ReadPointerField(address, type, nameof(NextPtr));
     }
 
     public TargetPointer StartIp { get; init; }
     public TargetPointer ParentPtr { get; init; }
+    public TargetPointer Ip { get; init; }
+    public TargetPointer NextPtr { get; init; }
 }

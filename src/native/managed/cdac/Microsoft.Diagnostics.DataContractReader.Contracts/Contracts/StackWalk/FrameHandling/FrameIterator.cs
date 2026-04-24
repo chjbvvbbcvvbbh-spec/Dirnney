@@ -208,7 +208,8 @@ internal sealed class FrameIterator
             case FrameType.InterpreterFrame:
                 {
                     Data.InterpreterFrame interpreterFrame = target.ProcessedData.GetOrAdd<Data.InterpreterFrame>(frame.Address);
-                    return ResolveMethodDescFromInterpFrame(target, interpreterFrame.TopInterpMethodContextFrame);
+                    TargetPointer topContextFrame = ResolveTopInterpMethodContextFrame(target, interpreterFrame.TopInterpMethodContextFrame);
+                    return ResolveMethodDescFromInterpFrame(target, topContextFrame);
                 }
             case FrameType.PInvokeCalliFrame:
                 return TargetPointer.Null;
@@ -262,17 +263,61 @@ internal sealed class FrameIterator
     }
 
     /// <summary>
-    /// Walks the InterpMethodContextFrame.ParentPtr chain for an InterpreterFrame,
-    /// yielding one context frame pointer per interpreted method in the call chain.
+    /// Resolves the actual top InterpMethodContextFrame from the hint stored in InterpreterFrame,
+    /// replicating InterpreterFrame::GetTopInterpMethodContextFrame() from frames.cpp.
+    /// The stored TopInterpMethodContextFrame is only an approximate hint; during dump or native
+    /// debugging it may point to a stale frame. This method seeks to the correct top frame using
+    /// the Ip field (null = inactive, non-null = active) and the NextPtr/ParentPtr chains.
+    /// </summary>
+    internal static TargetPointer ResolveTopInterpMethodContextFrame(Target target, TargetPointer hintPtr)
+    {
+        if (hintPtr == TargetPointer.Null)
+            return TargetPointer.Null;
+
+        Data.InterpMethodContextFrame frame = target.ProcessedData.GetOrAdd<Data.InterpMethodContextFrame>(hintPtr);
+        TargetPointer currentPtr = hintPtr;
+
+        if (frame.Ip != TargetPointer.Null)
+        {
+            // Active frame — seek upward via NextPtr while next frame is also active
+            while (frame.NextPtr != TargetPointer.Null)
+            {
+                Data.InterpMethodContextFrame next = target.ProcessedData.GetOrAdd<Data.InterpMethodContextFrame>(frame.NextPtr);
+                if (next.Ip == TargetPointer.Null)
+                    break;
+                currentPtr = frame.NextPtr;
+                frame = next;
+            }
+        }
+        else
+        {
+            // Inactive frame — seek downward via ParentPtr to find first active frame
+            while (frame.ParentPtr != TargetPointer.Null && frame.Ip == TargetPointer.Null)
+            {
+                currentPtr = frame.ParentPtr;
+                frame = target.ProcessedData.GetOrAdd<Data.InterpMethodContextFrame>(currentPtr);
+            }
+        }
+
+        return currentPtr;
+    }
+
+    /// <summary>
+    /// Walks the InterpMethodContextFrame chain for an InterpreterFrame,
+    /// yielding one context frame pointer per active interpreted method in the call chain.
+    /// The TopInterpMethodContextFrame hint is first resolved to the actual top frame
+    /// via ResolveTopInterpMethodContextFrame, then the ParentPtr chain is walked.
+    /// Only active frames (Ip != null) are yielded.
     /// </summary>
     internal static IEnumerable<TargetPointer> WalkInterpreterFrameChain(Target target, TargetPointer frameAddress)
     {
         Data.InterpreterFrame interpFrame = target.ProcessedData.GetOrAdd<Data.InterpreterFrame>(frameAddress);
-        TargetPointer interpMethodFramePtr = interpFrame.TopInterpMethodContextFrame;
+        TargetPointer interpMethodFramePtr = ResolveTopInterpMethodContextFrame(target, interpFrame.TopInterpMethodContextFrame);
         while (interpMethodFramePtr != TargetPointer.Null)
         {
-            yield return interpMethodFramePtr;
             Data.InterpMethodContextFrame contextFrame = target.ProcessedData.GetOrAdd<Data.InterpMethodContextFrame>(interpMethodFramePtr);
+            if (contextFrame.Ip != TargetPointer.Null)
+                yield return interpMethodFramePtr;
             interpMethodFramePtr = contextFrame.ParentPtr;
         }
     }

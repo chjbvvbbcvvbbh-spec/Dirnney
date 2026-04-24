@@ -862,6 +862,8 @@ CDAC_TYPE_BEGIN(InterpMethodContextFrame)
 CDAC_TYPE_INDETERMINATE(InterpMethodContextFrame)
 CDAC_TYPE_FIELD(InterpMethodContextFrame, T_POINTER, StartIp, offsetof(InterpMethodContextFrame, startIp))
 CDAC_TYPE_FIELD(InterpMethodContextFrame, T_POINTER, ParentPtr, offsetof(InterpMethodContextFrame, pParent))
+CDAC_TYPE_FIELD(InterpMethodContextFrame, T_POINTER, Ip, offsetof(InterpMethodContextFrame, ip))
+CDAC_TYPE_FIELD(InterpMethodContextFrame, T_POINTER, NextPtr, offsetof(InterpMethodContextFrame, pNext))
 CDAC_TYPE_END(InterpMethodContextFrame)
 #endif // FEATURE_INTERPRETER
 

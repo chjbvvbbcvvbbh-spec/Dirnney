@@ -263,7 +263,7 @@ The bulk of the work is done by the `GetCodeBlockHandle` API that maps a code po
     }
 ```
 
-There are three JIT managers: the "EE JitManager" for jitted code, the "Interpreter JitManager" for interpreter code, and the "R2R JitManager" for ReadyToRun code.
+There are three JIT managers: the "EE JitManager" for jitted code, the "Interpreter JitManager" for interpreted code, and the "R2R JitManager" for ReadyToRun code.
 
 The EE JitManager and Interpreter JitManager both use the same nibble map lookup to find method code.
 The only difference is which code header type is read: the EE JitManager reads a `RealCodeHeader` while the Interpreter JitManager reads an `InterpreterRealCodeHeader`.

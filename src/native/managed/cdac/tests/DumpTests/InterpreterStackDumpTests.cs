@@ -149,4 +149,40 @@ public class InterpreterStackDumpTests : DumpTestBase
 
         Assert.True(threadCount >= 1, "Expected at least one thread when walking the list");
     }
+
+    [ConditionalTheory]
+    [MemberData(nameof(TestConfigurations))]
+    public void StackWalk_NoDoubledInterpreterFrames(TestConfiguration config)
+    {
+        InitializeDumpTest(config);
+        SkipIfInterpreterNotAvailable();
+
+        ThreadData crashingThread = DumpTestHelpers.FindFailFastThread(Target);
+        DumpTestStackWalker walker = DumpTestStackWalker.Walk(Target, crashingThread);
+
+        // Verify that no interpreted method appears more than once in the stack walk.
+        // This guards against the double-walking bug where interpreter frames are yielded
+        // both from the initial context and again from the InterpreterFrame expansion.
+        var interpreterMethods = walker.Frames
+            .Where(f => f.FrameName is "InterpreterFrame")
+            .Select(f => f.Name)
+            .Where(n => n is not null)
+            .ToList();
+
+        var duplicates = interpreterMethods
+            .GroupBy(n => n)
+            .Where(g => g.Count() > 1)
+            .Select(g => g.Key)
+            .ToList();
+
+        Assert.True(duplicates.Count == 0,
+            $"Doubled interpreter frames detected: [{string.Join(", ", duplicates)}]. " +
+            $"Full stack: [{string.Join(", ", walker.Frames.Select(f => f.Name ?? "<null>"))}]");
+
+        // Also verify all expected interpreter methods are present exactly once
+        Assert.Contains(interpreterMethods, n => n is "MethodA");
+        Assert.Contains(interpreterMethods, n => n is "MethodB");
+        Assert.Contains(interpreterMethods, n => n is "MethodC");
+        Assert.Contains(interpreterMethods, n => n is "MethodD");
+    }
 }
