@@ -12,6 +12,15 @@
 #include "gchelpers.inl"
 #include "arraynative.inl"
 
+#ifdef TARGET_WASM
+extern void SamplingProfiler_OnSamplepoint();
+#endif
+
+#ifdef TARGET_BROWSER
+extern void BrowserProfiler_OnMethodEnter(void *pMethodDesc);
+extern void BrowserProfiler_OnMethodLeave();
+#endif
+
 // for numeric_limits
 #include <limits>
 #include <functional>
@@ -1904,6 +1913,37 @@ SWITCH_OPCODE:
                     ip++;
                     break;
 
+#ifdef TARGET_WASM
+                case INTOP_PROF_SAMPLEPOINT:
+                    SamplingProfiler_OnSamplepoint();
+                    ip++;
+                    break;
+#else
+                case INTOP_PROF_SAMPLEPOINT:
+                    ip++;
+                    break;
+#endif
+
+#ifdef TARGET_BROWSER
+                case INTOP_PROF_ENTER:
+                    BrowserProfiler_OnMethodEnter(pMethod->pDataItems[ip[1]]);
+                    ip += 2;
+                    break;
+
+                case INTOP_PROF_LEAVE:
+                    BrowserProfiler_OnMethodLeave();
+                    ip++;
+                    break;
+#else
+                case INTOP_PROF_ENTER:
+                    ip += 2;
+                    break;
+
+                case INTOP_PROF_LEAVE:
+                    ip++;
+                    break;
+#endif
+
                 case INTOP_BR:
                     ip += ip[1];
                     break;
@@ -3380,6 +3420,9 @@ CALL_INTERP_METHOD:
 
                     if (frameNeedsTailcallUpdate)
                     {
+#ifdef TARGET_BROWSER
+                        BrowserProfiler_OnMethodLeave();
+#endif
                         InterpMethod* pTargetMethod = targetIp->Method;
                         UpdateFrameForTailCall(pFrame, targetIp, callArgsAddress);
                         frameNeedsTailcallUpdate = false;
@@ -4606,6 +4649,9 @@ do                                                                      \
                 // Thus, we need to rethrow it to let it propagate further.
                 throw;
             }
+#ifdef TARGET_BROWSER
+            BrowserProfiler_OnMethodLeave();
+#endif
             pThreadContext->frameDataAllocator.PopInfo(pFrame);
             pFrame->ip = 0;
             pFrame = pFrame->pParent;
