@@ -1396,6 +1396,13 @@ StackWalkAction DebuggerWalkStackProc(CrawlFrame *pCF, void *data)
         }
     } // if (d->needParentInfo)
 
+    // Skip Environment.CallEntryPoint ([StackTraceHidden]).
+    if (md != NULL && md == g_pEnvironmentCallEntryPointMethodDesc)
+    {
+        LOG((LF_CORDB, LL_INFO1000, "DWSP: Skipping CallEntryPoint frame\n"));
+        return SWA_CONTINUE;
+    }
+
     // The tricky part here is that we want to skip all frames between a funclet method frame
     // and the parent method frame UNLESS the funclet is a filter.  We only have to check for fpParent
     // here (instead of checking d->info.fIsFunclet and d->info.fIsFilter as well, as in the beginning of

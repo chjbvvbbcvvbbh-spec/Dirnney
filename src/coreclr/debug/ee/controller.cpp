@@ -7885,6 +7885,40 @@ TP_RESULT DebuggerStepper::TriggerPatch(DebuggerControllerPatch *patch,
     {
         LOG((LF_CORDB, LL_INFO10000, "Step patch hit at 0x%x\n", offset));
 
+#ifdef FEATURE_INTERPRETER
+        // Step over INTOP_CALL_FINALLY (internal EH machinery).
+        {
+            PCODE currentPC = GetControlPC(&(info.m_activeFrame.registers));
+            EECodeInfo codeInfo(currentPC);
+            if (codeInfo.IsInterpretedCode())
+            {
+                InterpreterWalker walker;
+                walker.Init((const int32_t*)currentPC, NULL);
+
+                bool isCallFinally = walker.GetOpcode() == INTOP_CALL_FINALLY;
+
+                // A sequence point may precede CALL_FINALLY; check the following opcode.
+                if (!isCallFinally
+                    && walker.GetOpcode() == INTOP_DEBUG_SEQ_POINT
+                    && walker.GetSkipIP() != NULL)
+                {
+                    InterpreterWalker nextWalker;
+                    nextWalker.Init(walker.GetSkipIP(), NULL);
+                    isCallFinally = nextWalker.GetOpcode() == INTOP_CALL_FINALLY;
+                }
+
+                if (isCallFinally)
+                {
+                    LOG((LF_CORDB, LL_INFO10000, "DS::TP: Skipping interpreter CALL_FINALLY at %p, continuing step\n", currentPC));
+                    if (!TrapStep(&info, m_stepIn))
+                        TrapStepNext(&info);
+                    EnableUnwind(m_fp);
+                    return TPR_IGNORE;
+                }
+            }
+        }
+#endif // FEATURE_INTERPRETER
+
         // For a JMC stepper, we have an additional constraint:
         // skip non-user code. So if we're still in non-user code, then
         // we've got to keep going
