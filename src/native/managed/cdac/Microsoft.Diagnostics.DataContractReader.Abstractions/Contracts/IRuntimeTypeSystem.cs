@@ -214,7 +214,6 @@ public interface IRuntimeTypeSystem : IContract
     TargetPointer GetMethodDescVersioningState(MethodDescHandle methodDesc) => throw new NotImplementedException();
 
     TargetCodePointer GetNativeCode(MethodDescHandle methodDesc) => throw new NotImplementedException();
-
     TargetCodePointer GetMethodEntryPointIfExists(MethodDescHandle methodDesc) => throw new NotImplementedException();
 
     ushort GetSlotNumber(MethodDescHandle methodDesc) => throw new NotImplementedException();

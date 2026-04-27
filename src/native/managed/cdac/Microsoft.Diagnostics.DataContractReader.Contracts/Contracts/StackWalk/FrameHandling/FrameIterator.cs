@@ -208,7 +208,7 @@ internal sealed class FrameIterator
             case FrameType.InterpreterFrame:
                 {
                     Data.InterpreterFrame interpreterFrame = target.ProcessedData.GetOrAdd<Data.InterpreterFrame>(frame.Address);
-                    TargetPointer topContextFrame = ResolveTopInterpMethodContextFrame(target, interpreterFrame.TopInterpMethodContextFrame);
+                    TargetPointer topContextFrame = ResolveTopInterpMethodContextFrame(target, interpreterFrame);
                     return ResolveMethodDescFromInterpFrame(target, topContextFrame);
                 }
             case FrameType.PInvokeCalliFrame:
@@ -269,8 +269,9 @@ internal sealed class FrameIterator
     /// debugging it may point to a stale frame. This method seeks to the correct top frame using
     /// the Ip field (null = inactive, non-null = active) and the NextPtr/ParentPtr chains.
     /// </summary>
-    internal static TargetPointer ResolveTopInterpMethodContextFrame(Target target, TargetPointer hintPtr)
+    internal static TargetPointer ResolveTopInterpMethodContextFrame(Target target, Data.InterpreterFrame interpreterFrame)
     {
+        TargetPointer hintPtr = interpreterFrame.TopInterpMethodContextFrame;
         if (hintPtr == TargetPointer.Null)
             return TargetPointer.Null;
 
@@ -312,7 +313,7 @@ internal sealed class FrameIterator
     internal static IEnumerable<TargetPointer> WalkInterpreterFrameChain(Target target, TargetPointer frameAddress)
     {
         Data.InterpreterFrame interpFrame = target.ProcessedData.GetOrAdd<Data.InterpreterFrame>(frameAddress);
-        TargetPointer interpMethodFramePtr = ResolveTopInterpMethodContextFrame(target, interpFrame.TopInterpMethodContextFrame);
+        TargetPointer interpMethodFramePtr = ResolveTopInterpMethodContextFrame(target, interpFrame);
         while (interpMethodFramePtr != TargetPointer.Null)
         {
             Data.InterpMethodContextFrame contextFrame = target.ProcessedData.GetOrAdd<Data.InterpMethodContextFrame>(interpMethodFramePtr);
