@@ -71,6 +71,7 @@ internal sealed class ClrMdDumpHost : IDisposable
         {
             return -1;
         }
+        Console.WriteLine(foundFile);
 
         using FileStream fs = File.OpenRead(foundFile);
         using PEReader peReader = new PEReader(fs);
