@@ -6,5 +6,6 @@
     <NoWarn>$(NoWarn);CA2007;CA2252</NoWarn>
     <!-- Full dump needed so that module metadata is available for type lookup -->
     <DumpTypes>Full</DumpTypes>
+    <R2RModes>Jit</R2RModes>
   </PropertyGroup>
 </Project>
