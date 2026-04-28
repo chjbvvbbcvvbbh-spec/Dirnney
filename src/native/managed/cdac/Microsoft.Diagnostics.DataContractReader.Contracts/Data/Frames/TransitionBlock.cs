@@ -18,6 +18,12 @@ internal class TransitionBlock : IData<TransitionBlock>
         {
             ArgumentRegisters = address + (ulong)type.Fields[nameof(ArgumentRegisters)].Offset;
         }
+
+        // These are offsets relative to the TransitionBlock pointer, stored as field "offsets"
+        // in the data descriptor. They represent computed layout positions, not actual memory reads.
+        FirstGCRefMapSlot = (uint)type.Fields[nameof(FirstGCRefMapSlot)].Offset;
+        ArgumentRegistersOffset = (uint)type.Fields[nameof(ArgumentRegistersOffset)].Offset;
+        OffsetOfFloatArgumentRegisters = type.Fields[nameof(OffsetOfFloatArgumentRegisters)].Offset;
     }
 
     public TargetPointer ReturnAddress { get; }
@@ -27,4 +33,21 @@ internal class TransitionBlock : IData<TransitionBlock>
     /// Only available on ARM targets.
     /// </summary>
     public TargetPointer? ArgumentRegisters { get; }
+
+    /// <summary>
+    /// Offset to the first slot covered by the GCRefMap, relative to the TransitionBlock pointer.
+    /// </summary>
+    public uint FirstGCRefMapSlot { get; }
+
+    /// <summary>
+    /// Offset to the argument registers area, relative to the TransitionBlock pointer.
+    /// </summary>
+    public uint ArgumentRegistersOffset { get; }
+
+    /// <summary>
+    /// Offset to the float argument registers area, relative to the TransitionBlock pointer.
+    /// Negative on most platforms (float regs are stored before the TransitionBlock).
+    /// Zero on platforms without float argument registers (x86, Windows x64).
+    /// </summary>
+    public int OffsetOfFloatArgumentRegisters { get; }
 }
