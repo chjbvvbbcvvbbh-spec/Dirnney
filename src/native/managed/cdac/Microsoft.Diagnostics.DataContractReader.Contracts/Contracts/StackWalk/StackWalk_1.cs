@@ -46,7 +46,8 @@ internal partial class StackWalk_1 : IStackWalk
         TargetPointer FrameAddress,
         ThreadData ThreadData,
         bool IsResumableFrame = false,
-        bool IsActiveFrame = false) : IStackDataFrameHandle
+        bool IsActiveFrame = false,
+        TargetPointer InterpContextFramePtr = default) : IStackDataFrameHandle
     { }
 
     private class StackWalkData(IPlatformAgnosticContext context, StackWalkState state, FrameIterator frameIter, ThreadData threadData)
@@ -56,11 +57,17 @@ internal partial class StackWalk_1 : IStackWalk
         public FrameIterator FrameIter { get; set; } = frameIter;
         public ThreadData ThreadData { get; set; } = threadData;
 
-
         // Track isFirst exactly like native CrawlFrame::isFirst in StackFrameIterator.
         // Starts true, set false after processing a managed (frameless) frame,
         // set back to true when encountering a ResumableFrame (FRAME_ATTR_RESUMABLE).
         public bool IsFirst { get; set; } = true;
+
+        // When the stack walk starts with an explicit context in interpreted code (e.g., from
+        // a debugger breakpoint), the first InterpreterFrame on the frame chain corresponds to
+        // the frames already yielded from the initial context. Setting this flag causes YieldFrames
+        // to skip expanding that InterpreterFrame, preventing double-walking.
+        // See PR #126953 for the equivalent native fix.
+        public bool SkipNextInterpreterFrame { get; set; }
 
         public bool IsCurrentFrameResumable()
         {
@@ -97,11 +104,11 @@ internal partial class StackWalk_1 : IStackWalk
             }
         }
 
-        public StackDataFrameHandle ToDataFrame()
+        public StackDataFrameHandle ToDataFrame(TargetPointer interpContextFramePtr = default)
         {
             bool isResumable = IsCurrentFrameResumable();
             bool isActiveFrame = IsFirst && State == StackWalkState.SW_FRAMELESS;
-            return new(Context.Clone(), State, FrameIter.CurrentFrameAddress, ThreadData, isResumable, isActiveFrame);
+            return new(Context.Clone(), State, FrameIter.CurrentFrameAddress, ThreadData, isResumable, isActiveFrame, interpContextFramePtr);
         }
     }
 
@@ -125,7 +132,17 @@ internal partial class StackWalk_1 : IStackWalk
     {
         IPlatformAgnosticContext context = IPlatformAgnosticContext.GetContextForPlatform(_target);
         FillContextFromThread(context, threadData);
-        StackWalkState state = IsManaged(context.InstructionPointer, out _) ? StackWalkState.SW_FRAMELESS : StackWalkState.SW_FRAME;
+        bool startedInInterpreterCode = false;
+        StackWalkState state;
+        if (IsManaged(context.InstructionPointer, out CodeBlockHandle? initialCbh))
+        {
+            state = StackWalkState.SW_FRAMELESS;
+            startedInInterpreterCode = _eman.GetJITType(initialCbh.Value) == JitType.Interpreter;
+        }
+        else
+        {
+            state = StackWalkState.SW_FRAME;
+        }
         FrameIterator frameIterator = new(_target, threadData);
 
         if (skipInitialFrames)
@@ -153,7 +170,10 @@ internal partial class StackWalk_1 : IStackWalk
             yield break;
         }
 
-        StackWalkData stackWalkData = new(context, state, frameIterator, threadData);
+        StackWalkData stackWalkData = new(context, state, frameIterator, threadData)
+        {
+            SkipNextInterpreterFrame = startedInInterpreterCode,
+        };
 
         // Mirror native Init() -> ProcessCurrentFrame() -> CheckForSkippedFrames():
         // When the initial frame is managed (SW_FRAMELESS), check if there are explicit
@@ -164,14 +184,47 @@ internal partial class StackWalk_1 : IStackWalk
             stackWalkData.State = StackWalkState.SW_SKIPPED_FRAME;
         }
 
-        yield return stackWalkData.ToDataFrame();
+        foreach (StackDataFrameHandle frame in YieldFrames(stackWalkData))
+            yield return frame;
         stackWalkData.AdvanceIsFirst();
 
         while (Next(stackWalkData))
         {
-            yield return stackWalkData.ToDataFrame();
+            foreach (StackDataFrameHandle frame in YieldFrames(stackWalkData))
+                yield return frame;
             stackWalkData.AdvanceIsFirst();
         }
+    }
+
+    /// <summary>
+    /// Yields one or more data frames for the current stack walk position.
+    /// For InterpreterFrame, walks the InterpMethodContextFrame chain
+    /// to yield a separate frame for each interpreted method in the call chain.
+    /// </summary>
+    private IEnumerable<StackDataFrameHandle> YieldFrames(StackWalkData stackWalkData)
+    {
+        if (stackWalkData.State is StackWalkState.SW_FRAME or StackWalkState.SW_SKIPPED_FRAME)
+        {
+            TargetPointer frameAddress = stackWalkData.FrameIter.CurrentFrameAddress;
+            if (frameAddress != TargetPointer.Null
+                && stackWalkData.FrameIter.GetCurrentFrameType() == FrameIterator.FrameType.InterpreterFrame)
+            {
+                // When the stack walk started with a context in interpreted code (e.g., from
+                // a debugger breakpoint), the frames from the initial context were already yielded
+                // as frameless frames. Skip the first InterpreterFrame to avoid double-walking.
+                if (stackWalkData.SkipNextInterpreterFrame)
+                {
+                    stackWalkData.SkipNextInterpreterFrame = false;
+                    yield break;
+                }
+
+                foreach (TargetPointer contextFramePtr in FrameIterator.WalkInterpreterFrameChain(_target, frameAddress))
+                    yield return stackWalkData.ToDataFrame(contextFramePtr);
+                yield break;
+            }
+        }
+
+        yield return stackWalkData.ToDataFrame();
     }
 
     IReadOnlyList<StackReferenceData> IStackWalk.WalkStackReferences(ThreadData threadData)
@@ -586,6 +639,8 @@ internal partial class StackWalk_1 : IStackWalk
         switch (handle.State)
         {
             case StackWalkState.SW_FRAMELESS:
+                TargetPointer prevIP = handle.Context.InstructionPointer;
+                TargetPointer prevSP = handle.Context.StackPointer;
                 try
                 {
                     handle.Context.Unwind(_target);
@@ -594,6 +649,20 @@ internal partial class StackWalk_1 : IStackWalk
                 {
                     handle.State = StackWalkState.SW_ERROR;
                     throw;
+                }
+                // Guard against infinite loops when Unwind fails to advance.
+                // If both IP and SP are unchanged, the unwinder made no progress.
+                // Fall back to the Frame chain if possible, otherwise complete.
+                if (handle.Context.InstructionPointer == prevIP
+                    && handle.Context.StackPointer == prevSP)
+                {
+                    if (handle.FrameIter.IsValid())
+                    {
+                        handle.State = StackWalkState.SW_FRAME;
+                        return true;
+                    }
+                    handle.State = StackWalkState.SW_COMPLETE;
+                    return false;
                 }
                 break;
             case StackWalkState.SW_SKIPPED_FRAME:
@@ -695,6 +764,12 @@ internal partial class StackWalk_1 : IStackWalk
     TargetPointer IStackWalk.GetMethodDescPtr(IStackDataFrameHandle stackDataFrameHandle)
     {
         StackDataFrameHandle handle = AssertCorrectHandle(stackDataFrameHandle);
+
+        // If this is a synthetic interpreter chain frame, resolve directly from the specific context frame
+        if (handle.InterpContextFramePtr != TargetPointer.Null)
+        {
+            return FrameIterator.ResolveMethodDescFromInterpFrame(_target, handle.InterpContextFramePtr);
+        }
 
         // if we are at a capital F Frame, we can get the method desc from the frame
         TargetPointer framePtr = ((IStackWalk)this).GetFrameAddress(handle);

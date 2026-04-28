@@ -78,7 +78,8 @@ public enum JitType : uint
 {
     Unknown = 0,
     Jit = 1,
-    R2R = 2
+    R2R = 2,
+    Interpreter = 3
 }
 
 public interface IExecutionManager : IContract

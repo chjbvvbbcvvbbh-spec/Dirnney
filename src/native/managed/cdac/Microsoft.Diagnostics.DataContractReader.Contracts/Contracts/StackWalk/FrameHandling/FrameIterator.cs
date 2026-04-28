@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System;
+using System.Collections.Generic;
 
 namespace Microsoft.Diagnostics.DataContractReader.Contracts.StackWalkHelpers;
 
@@ -22,6 +23,7 @@ internal sealed class FrameIterator
         CallCountingHelperFrame,
         ExternalMethodFrame,
         DynamicHelperFrame,
+        InterpreterFrame,
 
         FuncEvalFrame,
 
@@ -41,7 +43,6 @@ internal sealed class FrameIterator
         DebuggerExitFrame,
         DebuggerU2MCatchHandlerFrame,
         ExceptionFilterFrame,
-        InterpreterFrame,
     }
 
     private readonly Target target;
@@ -95,6 +96,7 @@ internal sealed class FrameIterator
             case FrameType.CallCountingHelperFrame:
             case FrameType.ExternalMethodFrame:
             case FrameType.DynamicHelperFrame:
+            case FrameType.InterpreterFrame:
                 // FrameMethodFrame is the base type for all transition Frames
                 Data.FramedMethodFrame framedMethodFrame = target.ProcessedData.GetOrAdd<Data.FramedMethodFrame>(CurrentFrame.Address);
                 GetFrameHandler(context).HandleTransitionFrame(framedMethodFrame);
@@ -201,9 +203,14 @@ internal sealed class FrameIterator
             case FrameType.ExternalMethodFrame:
             case FrameType.PrestubMethodFrame:
             case FrameType.CallCountingHelperFrame:
-            case FrameType.InterpreterFrame:
                 Data.FramedMethodFrame framedMethodFrame = target.ProcessedData.GetOrAdd<Data.FramedMethodFrame>(frame.Address);
                 return framedMethodFrame.MethodDescPtr;
+            case FrameType.InterpreterFrame:
+                {
+                    Data.InterpreterFrame interpreterFrame = target.ProcessedData.GetOrAdd<Data.InterpreterFrame>(frame.Address);
+                    TargetPointer topContextFrame = ResolveTopInterpMethodContextFrame(target, interpreterFrame);
+                    return ResolveMethodDescFromInterpFrame(target, topContextFrame);
+                }
             case FrameType.PInvokeCalliFrame:
                 return TargetPointer.Null;
             case FrameType.StubDispatchFrame:
@@ -230,6 +237,89 @@ internal sealed class FrameIterator
                     return TargetPointer.Null;
             default:
                 return TargetPointer.Null;
+        }
+    }
+
+    /// <summary>
+    /// Resolves the MethodDesc from a specific InterpMethodContextFrame by following:
+    /// InterpMethodContextFrame.StartIp -> InterpByteCodeStart.Method -> InterpMethod.MethodDesc
+    /// </summary>
+    internal static TargetPointer ResolveMethodDescFromInterpFrame(Target target, TargetPointer interpMethodFramePtr)
+    {
+        if (interpMethodFramePtr == TargetPointer.Null)
+            return TargetPointer.Null;
+
+        Data.InterpMethodContextFrame contextFrame = target.ProcessedData.GetOrAdd<Data.InterpMethodContextFrame>(interpMethodFramePtr);
+        if (contextFrame.StartIp == TargetPointer.Null)
+            return TargetPointer.Null;
+
+        Data.InterpByteCodeStart byteCodeStart = target.ProcessedData.GetOrAdd<Data.InterpByteCodeStart>(contextFrame.StartIp);
+        if (byteCodeStart.Method == TargetPointer.Null)
+            return TargetPointer.Null;
+
+        Data.InterpMethod interpMethod = target.ProcessedData.GetOrAdd<Data.InterpMethod>(byteCodeStart.Method);
+
+        return interpMethod.MethodDesc;
+    }
+
+    /// <summary>
+    /// Resolves the actual top InterpMethodContextFrame from the hint stored in InterpreterFrame,
+    /// replicating InterpreterFrame::GetTopInterpMethodContextFrame() from frames.cpp.
+    /// The stored TopInterpMethodContextFrame is only an approximate hint; during dump or native
+    /// debugging it may point to a stale frame. This method seeks to the correct top frame using
+    /// the Ip field (null = inactive, non-null = active) and the NextPtr/ParentPtr chains.
+    /// </summary>
+    internal static TargetPointer ResolveTopInterpMethodContextFrame(Target target, Data.InterpreterFrame interpreterFrame)
+    {
+        TargetPointer hintPtr = interpreterFrame.TopInterpMethodContextFrame;
+        if (hintPtr == TargetPointer.Null)
+            return TargetPointer.Null;
+
+        Data.InterpMethodContextFrame frame = target.ProcessedData.GetOrAdd<Data.InterpMethodContextFrame>(hintPtr);
+        TargetPointer currentPtr = hintPtr;
+
+        if (frame.Ip != TargetPointer.Null)
+        {
+            // Active frame — seek upward via NextPtr while next frame is also active
+            while (frame.NextPtr != TargetPointer.Null)
+            {
+                Data.InterpMethodContextFrame next = target.ProcessedData.GetOrAdd<Data.InterpMethodContextFrame>(frame.NextPtr);
+                if (next.Ip == TargetPointer.Null)
+                    break;
+                currentPtr = frame.NextPtr;
+                frame = next;
+            }
+        }
+        else
+        {
+            // Inactive frame — seek downward via ParentPtr to find first active frame
+            while (frame.ParentPtr != TargetPointer.Null && frame.Ip == TargetPointer.Null)
+            {
+                currentPtr = frame.ParentPtr;
+                frame = target.ProcessedData.GetOrAdd<Data.InterpMethodContextFrame>(currentPtr);
+            }
+        }
+
+        return currentPtr;
+    }
+
+    /// <summary>
+    /// Walks the InterpMethodContextFrame chain for an InterpreterFrame,
+    /// yielding one context frame pointer per active interpreted method in the call chain.
+    /// The TopInterpMethodContextFrame hint is first resolved to the actual top frame
+    /// via ResolveTopInterpMethodContextFrame, then the ParentPtr chain is walked.
+    /// Only active frames (Ip != null) are yielded.
+    /// </summary>
+    internal static IEnumerable<TargetPointer> WalkInterpreterFrameChain(Target target, TargetPointer frameAddress)
+    {
+        Data.InterpreterFrame interpFrame = target.ProcessedData.GetOrAdd<Data.InterpreterFrame>(frameAddress);
+        TargetPointer interpMethodFramePtr = ResolveTopInterpMethodContextFrame(target, interpFrame);
+        while (interpMethodFramePtr != TargetPointer.Null)
+        {
+            Data.InterpMethodContextFrame contextFrame = target.ProcessedData.GetOrAdd<Data.InterpMethodContextFrame>(interpMethodFramePtr);
+            if (contextFrame.Ip != TargetPointer.Null)
+                yield return interpMethodFramePtr;
+            interpMethodFramePtr = contextFrame.ParentPtr;
         }
     }
 
