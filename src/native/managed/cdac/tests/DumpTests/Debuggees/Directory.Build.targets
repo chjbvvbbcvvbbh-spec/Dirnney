@@ -1,6 +1,27 @@
 <Project>
   <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.targets', '$(MSBuildThisFileDirectory)..\'))" />
 
+  <!-- Use local crossgen2 if available -->
+  <Target Name="_OverrideWithLocalCrossgen2"
+          AfterTargets="ResolveReadyToRunCompilers"
+          Condition="'$(UseLocalCrossgen2)' == 'true' and '$(Crossgen2InBuildDir)' != ''">
+    <PropertyGroup>
+      <_LocalCrossgen2Path>$([MSBuild]::NormalizePath('$(Crossgen2InBuildDir)', 'crossgen2$(ExeSuffix)'))</_LocalCrossgen2Path>
+    </PropertyGroup>
+
+    <Error Condition="!Exists('$(_LocalCrossgen2Path)')"
+           Text="UseLocalCrossgen2=true but crossgen2 not found at '$(_LocalCrossgen2Path)'. Run 'build clr.tools' first." />
+
+    <ItemGroup>
+      <Crossgen2Tool Remove="@(Crossgen2Tool)" />
+      <Crossgen2Tool Include="$(_LocalCrossgen2Path)"
+                     TargetArch="$(TargetArchitecture)"
+                     TargetOS="$(TargetOS)"
+                     PerfmapFormatVersion="$(PublishReadyToRunPerfmapFormatVersion)" />
+    </ItemGroup>
+    <Message Text="Using local crossgen2: $(_LocalCrossgen2Path)" Importance="high" />
+  </Target>
+
   <!-- Target invoked by GenerateAllDumps (from DumpTests.targets) on each debuggee csproj
        to extract the DumpTypes property. Returns the project name with DumpTypes metadata. -->
   <Target Name="GetDumpTypes" Returns="@(_DumpTypeOutput)">

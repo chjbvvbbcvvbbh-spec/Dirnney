@@ -5,6 +5,5 @@
     <EnablePreviewFeatures>true</EnablePreviewFeatures>
     <NoWarn>$(NoWarn);CA2007;CA2252</NoWarn>
     <DumpTypes>Heap</DumpTypes>
-    <R2RModes>Jit</R2RModes>
   </PropertyGroup>
 </Project>
