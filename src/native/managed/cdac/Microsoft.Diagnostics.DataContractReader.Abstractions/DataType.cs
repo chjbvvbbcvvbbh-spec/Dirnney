@@ -32,6 +32,7 @@ public enum DataType
     TLSIndex,
     GCAllocContext,
     EEAllocContext,
+    [ManagedType("System.Exception")]
     Exception,
     ExceptionInfo,
     EEExceptionClause,
@@ -82,6 +83,7 @@ public enum DataType
     ManagedObjectWrapperHolderObject,
     ManagedObjectWrapperLayout,
     ComWrappersVtablePtrs,
+    [ManagedType("System.String")]
     String,
     MethodDesc,
     MethodDescChunk,
@@ -185,4 +187,42 @@ public enum DataType
     TableSegment,
     CardTableInfo,
     RegionFreeList,
+
+    /*
+     * Managed-only well-known types.
+     *
+     * These are not present in the native data descriptor (datadescriptor.inc); layout for
+     * them is resolved via <see cref="ITypeInfoSource"/> implementations (today, the
+     * <c>MetadataLayoutSource</c> contract, which reads ECMA metadata from the system
+     * assembly). The <see cref="ManagedTypeAttribute"/> names the fully-qualified managed
+     * type the source should look up.
+     *
+     * Offsets returned by <c>MetadataLayoutSource</c> are pre-shifted by
+     * <c>sizeof(Object)</c> so callers can compute <c>objectAddress + field.Offset</c>
+     * directly (matching the convention used by descriptor-provided reference-type layouts).
+     */
+
+    [ManagedType("System.Threading.Lock")]
+    Lock,
+
+    [ManagedType("System.Collections.Generic.List`1")]
+    List,
+
+    [ManagedType("System.Runtime.CompilerServices.ConditionalWeakTable`2")]
+    ConditionalWeakTable,
+
+    [ManagedType("System.Runtime.CompilerServices.ConditionalWeakTable`2+Container")]
+    ConditionalWeakTableContainer,
+
+    [ManagedType("System.Runtime.CompilerServices.ConditionalWeakTable`2+Entry")]
+    ConditionalWeakTableEntry,
+
+    [ManagedType("System.Runtime.InteropServices.ComWrappers")]
+    ComWrappers,
+
+    [ManagedType("System.Runtime.InteropServices.ComWrappers+NativeObjectWrapper")]
+    NativeObjectWrapper,
+
+    [ManagedType("System.Runtime.InteropServices.ComWrappers+ManagedObjectWrapperHolder")]
+    ManagedObjectWrapperHolder,
 }

@@ -13,22 +13,9 @@ bool TryGetValue(TargetPointer conditionalWeakTable, TargetPointer key, out Targ
 ## Version 1
 
 This contract reads the field layout of `ConditionalWeakTable<TKey, TValue>` and its nested types
-(`Container`, `Container+Entry`) via the `RuntimeTypeSystem` contract rather than cDAC data descriptors.
-Field offsets are resolved by name at runtime.
-
-Contract constants:
-| Constant | Value | Meaning |
-| --- | --- | --- |
-| `CWTNamespace` | `System.Runtime.CompilerServices` | Namespace of the `ConditionalWeakTable` type |
-| `CWTTypeName` | ``ConditionalWeakTable`2`` | Name of the `ConditionalWeakTable<TKey, TValue>` type |
-| `ContainerTypeName` | ``ConditionalWeakTable`2+Container`` | Name of the nested `Container` type |
-| `EntryTypeName` | ``ConditionalWeakTable`2+Entry`` | Name of the nested `Entry` value type |
-| `ContainerFieldName` | `_container` | Field on `ConditionalWeakTable` pointing to the active container |
-| `BucketsFieldName` | `_buckets` | Field on `Container` pointing to the `int[]` buckets array |
-| `EntriesFieldName` | `_entries` | Field on `Container` pointing to the `Entry[]` entries array |
-| `HashCodeFieldName` | `HashCode` | Field on `Entry` storing the hash code (masked to positive int) |
-| `NextFieldName` | `Next` | Field on `Entry` storing the next index in the chain, or -1 |
-| `DepHndFieldName` | `depHnd` | Field on `Entry` storing the dependent handle |
+(`Container`, `Container+Entry`) by calling `Target.GetTypeInfo(DataType)` with the corresponding
+`DataType` enum members (see the [`MetadataLayoutSource`](MetadataLayoutSource.md) contract) rather
+than via cDAC data descriptors. Field offsets are resolved by name at runtime.
 
 Data descriptors used:
 | Data Descriptor Name | Field | Meaning |
@@ -40,47 +27,32 @@ Contracts used:
 | --- |
 | `Object` |
 | `GC` |
+| `MetadataLayoutSource` |
 | `RuntimeTypeSystem` |
 
+Managed types used:
+
+| Managed Type | Field | Meaning |
+| --- | --- | --- |
+| `System.Runtime.CompilerServices.ConditionalWeakTable\`2` | `_container` | Pointer to the active `Container` holding buckets and entries |
+| `System.Runtime.CompilerServices.ConditionalWeakTable\`2+Container` | `_buckets` | `int[]` buckets array; each slot is an index into `_entries` or `-1` |
+| `System.Runtime.CompilerServices.ConditionalWeakTable\`2+Container` | `_entries` | `Entry[]` storage for the table's entries |
+| `System.Runtime.CompilerServices.ConditionalWeakTable\`2+Entry` | `HashCode` | Hash code of the key (masked to positive int); chain terminator when `-1` |
+| `System.Runtime.CompilerServices.ConditionalWeakTable\`2+Entry` | `Next` | Index of the next entry in the bucket chain, or `-1` |
+| `System.Runtime.CompilerServices.ConditionalWeakTable\`2+Entry` | `depHnd` | Dependent handle tying the key to the value |
+
 The algorithm looks up the `_container` field of the `ConditionalWeakTable` object, then reads the
-`_buckets` and `_entries` fields from the container. It resolves `Entry` field offsets (`HashCode`,
-`Next`, `depHnd`) via `RuntimeTypeSystem` and determines the entry stride from the entries array's
-component size.
+`_buckets` and `_entries` fields from the container. Each `Entry` is then read via its inline
+address in the entries array; its stride is determined from the entries array's component size.
 
 ``` csharp
 bool TryGetValue(TargetPointer conditionalWeakTable, TargetPointer key, out TargetPointer value)
 {
     value = TargetPointer.Null;
 
-    // Resolve field offsets by name from CoreLib via RuntimeTypeSystem.
-    // GetCoreLibFieldDescAndDef returns a FieldDesc address and FieldDefinition;
-    // GetFieldDescOffset extracts the byte offset from those.
-    IRuntimeTypeSystem rts = target.Contracts.RuntimeTypeSystem;
-
-    rts.GetCoreLibFieldDescAndDef(CWTNamespace, CWTTypeName, ContainerFieldName, out fd, out fDef);
-    uint containerOffset = rts.GetFieldDescOffset(fd, fDef);
-
-    rts.GetCoreLibFieldDescAndDef(CWTNamespace, ContainerTypeName, BucketsFieldName, out fd, out fDef);
-    uint bucketsOffset = rts.GetFieldDescOffset(fd, fDef);
-
-    rts.GetCoreLibFieldDescAndDef(CWTNamespace, ContainerTypeName, EntriesFieldName, out fd, out fDef);
-    uint entriesOffset = rts.GetFieldDescOffset(fd, fDef);
-
-    rts.GetCoreLibFieldDescAndDef(CWTNamespace, EntryTypeName, HashCodeFieldName, out fd, out fDef);
-    uint hashCodeOffset = rts.GetFieldDescOffset(fd, fDef);
-
-    rts.GetCoreLibFieldDescAndDef(CWTNamespace, EntryTypeName, NextFieldName, out fd, out fDef);
-    uint nextOffset = rts.GetFieldDescOffset(fd, fDef);
-
-    rts.GetCoreLibFieldDescAndDef(CWTNamespace, EntryTypeName, DepHndFieldName, out fd, out fDef);
-    uint depHndOffset = rts.GetFieldDescOffset(fd, fDef);
-
-    // Navigate from the ConditionalWeakTable object to its container
-    TargetPointer container = target.ReadPointer(conditionalWeakTable + /* Object data offset */ + containerOffset);
-
-    // Read the container's buckets and entries array pointers
-    TargetPointer bucketsPtr = target.ReadPointer(container + /* Object data offset */ + bucketsOffset);
-    TargetPointer entriesPtr = target.ReadPointer(container + /* Object data offset */ + entriesOffset);
+    Data.ConditionalWeakTable cwt = target.ProcessedData.GetOrAdd<Data.ConditionalWeakTable>(conditionalWeakTable);
+    Data.ConditionalWeakTableContainer container =
+        target.ProcessedData.GetOrAdd<Data.ConditionalWeakTableContainer>(cwt.Container);
 
     // Get the runtime default hash code for the key object (returns 0 if none assigned)
     int hashCode = target.Contracts.Object.TryGetHashCode(key);
@@ -89,34 +61,36 @@ bool TryGetValue(TargetPointer conditionalWeakTable, TargetPointer key, out Targ
 
     hashCode &= int.MaxValue;
 
-    // Read the buckets array length and find the bucket (bucketCount is a power of 2)
-    uint bucketCount = target.Read<uint>(bucketsPtr + /* Array::m_NumComponents offset */);
-    int bucket = hashCode & (int)(bucketCount - 1);
-    int entriesIndex = target.Read<int>(bucketsPtr + /* Array header size */ + bucket * sizeof(int));
+    // Read the buckets array and find the bucket (bucketCount is a power of 2)
+    Data.Array bucketsArray = target.ProcessedData.GetOrAdd<Data.Array>(container.Buckets);
+    int bucket = hashCode & (int)(bucketsArray.NumComponents - 1);
+    int entriesIndex = target.Read<int>(bucketsArray.DataPointer + bucket * sizeof(int));
 
     // Get entry size from the entries array's component size
-    TargetPointer entriesMT = target.Contracts.Object.GetMethodTableAddress(entriesPtr);
+    Data.Array entriesArray = target.ProcessedData.GetOrAdd<Data.Array>(container.Entries);
+    IRuntimeTypeSystem rts = target.Contracts.RuntimeTypeSystem;
+    TargetPointer entriesMT = target.Contracts.Object.GetMethodTableAddress(container.Entries);
     uint entrySize = rts.GetComponentSize(rts.GetTypeHandle(entriesMT));
 
     // Walk the chain
     while (entriesIndex != -1)
     {
-        TargetPointer entryAddr = entriesPtr + /* Array header size */ + (uint)entriesIndex * entrySize;
-        int entryHashCode = target.Read<int>(entryAddr + hashCodeOffset);
+        TargetPointer entryAddr = entriesArray.DataPointer + (uint)entriesIndex * entrySize;
+        Data.ConditionalWeakTableEntry entry =
+            target.ProcessedData.GetOrAdd<Data.ConditionalWeakTableEntry>(entryAddr);
 
-        if (entryHashCode == hashCode)
+        if (entry.HashCode == hashCode)
         {
-            // depHnd is an OBJECTHANDLE — a pointer to a pointer to the object
-            TargetPointer depHnd = target.ReadPointer(entryAddr + depHndOffset);
-            TargetPointer handleTarget = target.ReadPointer(depHnd);
-            if (handleTarget == key)
+            // DepHnd is an OBJECTHANDLE — a pointer to a pointer to the object
+            Data.ObjectHandle handle = target.ProcessedData.GetOrAdd<Data.ObjectHandle>(entry.DepHnd);
+            if (handle.Object == key)
             {
-                value = target.Contracts.GC.GetHandleExtraInfo(depHnd);
+                value = target.Contracts.GC.GetHandleExtraInfo(entry.DepHnd);
                 return true;
             }
         }
 
-        entriesIndex = target.Read<int>(entryAddr + nextOffset);
+        entriesIndex = entry.Next;
     }
 
     return false;

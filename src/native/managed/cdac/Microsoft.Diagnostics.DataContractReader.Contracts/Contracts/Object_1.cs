@@ -50,7 +50,11 @@ internal readonly struct Object_1 : IObject
         if (str.StringLength == 0)
             return string.Empty;
 
-        Span<byte> span = stackalloc byte[(int)str.StringLength * sizeof(char)];
+        int byteLength = str.StringLength * sizeof(char);
+        const int StackAllocThreshold = 1024;
+        Span<byte> span = byteLength <= StackAllocThreshold
+            ? stackalloc byte[StackAllocThreshold].Slice(0, byteLength)
+            : new byte[byteLength];
         _target.ReadBuffer(str.FirstChar, span);
         return new string(MemoryMarshal.Cast<byte, char>(span));
     }

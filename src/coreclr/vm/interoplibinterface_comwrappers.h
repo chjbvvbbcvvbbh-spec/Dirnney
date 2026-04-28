@@ -80,13 +80,6 @@ public:
     friend struct ::cdac_data<ManagedObjectWrapperHolderObject>;
 };
 
-template<>
-struct cdac_data<ManagedObjectWrapperHolderObject>
-{
-    static constexpr size_t WrappedObject = offsetof(ManagedObjectWrapperHolderObject, _wrappedObject);
-    static constexpr size_t Wrapper = offsetof(ManagedObjectWrapperHolderObject, _wrapper);
-};
-
 class NativeObjectWrapperObject : public Object
 {
     friend class CoreLibBinder;
@@ -109,12 +102,6 @@ public:
     }
 
     friend struct ::cdac_data<NativeObjectWrapperObject>;
-};
-
-template<>
-struct cdac_data<NativeObjectWrapperObject>
-{
-    static constexpr size_t ExternalComObject = offsetof(NativeObjectWrapperObject, _externalComObject);
 };
 
 class ReferenceTrackerNativeObjectWrapperObject final : public NativeObjectWrapperObject

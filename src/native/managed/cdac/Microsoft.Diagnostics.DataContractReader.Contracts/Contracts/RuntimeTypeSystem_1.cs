@@ -1960,18 +1960,4 @@ internal partial struct RuntimeTypeSystem_1 : IRuntimeTypeSystem
     TargetPointer IRuntimeTypeSystem.GetFieldDescStaticAddress(TargetPointer fieldDescPointer) => GetFieldDescStaticOrThreadStaticAddress(fieldDescPointer);
 
     TargetPointer IRuntimeTypeSystem.GetFieldDescThreadStaticAddress(TargetPointer fieldDescPointer, TargetPointer thread) => GetFieldDescStaticOrThreadStaticAddress(fieldDescPointer, thread);
-
-    void IRuntimeTypeSystem.GetCoreLibFieldDescAndDef(string @namespace, string typeName, string fieldName, out TargetPointer fieldDescAddr, out FieldDefinition fieldDef)
-    {
-        ILoader loader = _target.Contracts.Loader;
-        TargetPointer systemAssembly = loader.GetSystemAssembly();
-        ModuleHandle moduleHandle = loader.GetModuleHandleFromAssemblyPtr(systemAssembly);
-        IRuntimeTypeSystem rts = (IRuntimeTypeSystem)this;
-        TypeHandle th = rts.GetTypeByNameAndModule(typeName, @namespace, moduleHandle);
-        fieldDescAddr = rts.GetFieldDescByName(th, fieldName);
-        uint token = rts.GetFieldDescMemberDef(fieldDescAddr);
-        FieldDefinitionHandle fieldHandle = (FieldDefinitionHandle)MetadataTokens.Handle((int)token);
-        MetadataReader mdReader = _target.Contracts.EcmaMetadata.GetMetadata(moduleHandle)!;
-        fieldDef = mdReader.GetFieldDefinition(fieldHandle);
-    }
 }

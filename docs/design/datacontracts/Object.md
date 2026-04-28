@@ -29,8 +29,6 @@ Data descriptors used:
 | --- | --- | --- |
 | `Array` | `m_NumComponents` | Number of items in the array |
 | `Object` | `m_pMethTab` | Method table for the object |
-| `String` | `m_FirstChar` | First character of the string - `m_StringLength` can be used to read the full string (encoded in UTF-16) |
-| `String` | `m_StringLength` | Length of the string in characters (encoded in UTF-16) |
 | `SyncTableEntry` | `SyncBlock` | `SyncBlock` corresponding to the entry |
 | `ObjectHeader` | `SyncBlockValue` | Sync block value from the object header |
 | `SyncBlock` | `HashCode` | Hash code stored in the sync block |
@@ -52,8 +50,16 @@ Global variables used:
 Contracts used:
 | Contract Name |
 | --- |
+| `MetadataLayoutSource` |
 | `RuntimeTypeSystem` |
 | `SyncBlock` |
+
+Managed types used:
+
+| Managed Type | Field | Meaning |
+| --- | --- | --- |
+| `System.String` | `_stringLength` | Number of characters in the string |
+| `System.String` | `_firstChar` | First character of the string's inline character buffer |
 
 ``` csharp
 TargetPointer GetMethodTableAddress(TargetPointer address)
@@ -71,9 +77,9 @@ string GetStringValue(TargetPointer address)
     if (mt != stringMethodTable)
         throw new ArgumentException("Address does not represent a string object", nameof(address));
 
-    uint length = target.Read<uint>(address + /* String::m_StringLength offset */);
-    Span<byte> span = stackalloc byte[(int)length * sizeof(char)];
-    target.ReadBuffer(address + /* String::m_FirstChar offset */, span);
+    int length = target.Read<int>(address + /* String::_stringLength offset */);
+    Span<byte> span = stackalloc byte[length * sizeof(char)];
+    target.ReadBuffer(address + /* String::_firstChar offset */, span);
     return new string(MemoryMarshal.Cast<byte, char>(span));
 }
 

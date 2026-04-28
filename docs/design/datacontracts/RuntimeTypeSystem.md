@@ -240,11 +240,6 @@ TargetPointer GetFieldDescStaticAddress(TargetPointer fieldDescPointer);
 TargetPointer GetFieldDescThreadStaticAddress(TargetPointer fieldDescPointer, TargetPointer thread);
 ```
 
-### Other APIs
-```csharp
-void GetCoreLibFieldDescAndDef(string @namespace, string typeName, string fieldName, out TargetPointer fieldDescAddr, out FieldDefinition fieldDef);
-```
-
 ## Version 1
 
 ### TypeHandle
@@ -1890,23 +1885,5 @@ TargetPointer GetFieldDescThreadStaticAddress(TargetPointer fieldDescPointer, Ta
 {
     // Like GetFieldDescStaticAddress, but resolves thread-local base pointers instead.
     // Uses GetGCThreadStaticsBasePointer / GetNonGCThreadStaticsBasePointer.
-}
-```
-
-### Other APIs
-
-```csharp
-void GetCoreLibFieldDescAndDef(string @namespace, string typeName, string fieldName, out TargetPointer fieldDescAddr, out FieldDefinition fieldDef)
-{
-    ILoader loader = _target.Contracts.Loader;
-    TargetPointer systemAssembly = loader.GetSystemAssembly();
-    ModuleHandle moduleHandle = loader.GetModuleHandleFromAssemblyPtr(systemAssembly);
-    IRuntimeTypeSystem rts = (IRuntimeTypeSystem)this;
-    TypeHandle th = rts.GetTypeByNameAndModule(typeName, @namespace, moduleHandle);
-    fieldDescAddr = rts.GetFieldDescByName(th, fieldName);
-    uint token = rts.GetFieldDescMemberDef(fieldDescAddr);
-    FieldDefinitionHandle fieldHandle = (FieldDefinitionHandle)MetadataTokens.Handle((int)token);
-    MetadataReader mdReader = _target.Contracts.EcmaMetadata.GetMetadata(moduleHandle)!;
-    fieldDef = mdReader.GetFieldDefinition(fieldHandle);
 }
 ```

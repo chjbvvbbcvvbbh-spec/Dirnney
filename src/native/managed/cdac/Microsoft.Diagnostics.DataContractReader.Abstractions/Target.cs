@@ -232,10 +232,17 @@ public abstract class Target
     public abstract bool IsAlignedToPointerSize(TargetPointer pointer);
 
     /// <summary>
-    /// Returns the information about the given well-known data type in the target process
+    /// Returns the information about the given well-known data type in the target process.
     /// </summary>
-    /// <param name="type">The name of the well known type</param>
-    /// <returns>The information about the given type in the target process</returns>
+    /// <remarks>
+    /// Implementations aggregate contributions from the native data descriptor and any
+    /// registered <see cref="Contracts.ITypeInfoSource"/> contracts: the descriptor wins for
+    /// any field it supplies, with each <see cref="Contracts.ITypeInfoSource"/> filling in
+    /// fields (and optionally <see cref="TypeInfo.TypeHandle"/> /
+    /// <see cref="TypeInfo.StaticFields"/>) that the descriptor did not provide.
+    /// </remarks>
+    /// <param name="type">The well-known data type.</param>
+    /// <returns>The merged type information.</returns>
     public abstract TypeInfo GetTypeInfo(DataType type);
 
     /// <summary>
@@ -288,6 +295,19 @@ public abstract class Target
             init;
         }
 
+        /// <summary>
+        /// The runtime <see cref="Contracts.TypeHandle"/> (MethodTable) for this type in the
+        /// target process, or <c>null</c> if no source provided one (for example, when the
+        /// type information came only from the native data descriptor).
+        /// </summary>
+        public Contracts.TypeHandle? TypeHandle { get; init; }
+
+        /// <summary>
+        /// Absolute storage-slot addresses for each of the type's well-known static fields,
+        /// keyed by field name, or <c>null</c> if no source provided static-field information.
+        /// </summary>
+        public IReadOnlyDictionary<string, TargetPointer>? StaticFields { get; init; }
+
         public TypeInfo()
         {
             Fields = new Dictionary<string, FieldInfo>();
@@ -323,7 +343,7 @@ public abstract class Target
     /// Clear all cached data held by this target, including processed data and contract caches.
     /// Called when the target process state may have changed (e.g. on resume).
     /// </summary>
-    public void Flush()
+    public virtual void Flush()
     {
         ProcessedData.Clear();
         Contracts.Flush();

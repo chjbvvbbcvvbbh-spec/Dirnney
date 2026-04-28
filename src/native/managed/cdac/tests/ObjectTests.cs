@@ -43,10 +43,28 @@ public unsafe class ObjectTests
         }
         else
         {
+            uint firstCharOffset = (uint)objectBuilder.StringLayout.GetField("m_FirstChar").Offset;
+            uint stringLengthOffset = (uint)objectBuilder.StringLayout.GetField("m_StringLength").Offset;
+            Target.TypeInfo stringTypeInfo = new Target.TypeInfo
+            {
+                Fields = new Dictionary<string, Target.FieldInfo>
+                {
+                    ["_firstChar"] = new Target.FieldInfo { Offset = (int)firstCharOffset, TypeName = "uint16" },
+                    ["_stringLength"] = new Target.FieldInfo { Offset = (int)stringLengthOffset, TypeName = "int32" },
+                },
+                StaticFields = new Dictionary<string, TargetPointer>(),
+            };
+            var mockMetadataLayoutSource = new Mock<IMetadataLayoutSource>();
+            mockMetadataLayoutSource
+                .As<ITypeInfoSource>()
+                .Setup(m => m.TryGetTypeInfo(DataType.String, out stringTypeInfo))
+                .Returns(true);
+
             targetBuilder
                 .AddContract<IObject>(version: "c1")
                 .AddContract<IRuntimeTypeSystem>(version: "c1")
-                .AddContract<ISyncBlock>(version: "c1");
+                .AddContract<ISyncBlock>(version: "c1")
+                .AddMockContract(mockMetadataLayoutSource);
         }
 
         return targetBuilder.Build();
@@ -57,7 +75,6 @@ public unsafe class ObjectTests
         {
             [DataType.Object] = TargetTestHelpers.CreateTypeInfo(objectBuilder.ObjectLayout),
             [DataType.ObjectHeader] = TargetTestHelpers.CreateTypeInfo(objectBuilder.ObjectHeaderLayout),
-            [DataType.String] = TargetTestHelpers.CreateTypeInfo(objectBuilder.StringLayout),
             [DataType.Array] = TargetTestHelpers.CreateTypeInfo(objectBuilder.ArrayLayout),
             [DataType.SyncTableEntry] = TargetTestHelpers.CreateTypeInfo(objectBuilder.SyncTableEntryLayout),
             [DataType.SyncBlock] = TargetTestHelpers.CreateTypeInfo(objectBuilder.SyncBlockLayout),
