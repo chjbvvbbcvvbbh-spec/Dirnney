@@ -174,7 +174,7 @@
     <PropertyGroup>
       <_PublishOutDir>$([MSBuild]::NormalizeDirectory('$(RepoRoot)', 'artifacts', 'bin', 'DumpTests', '$(DebuggeeName)', '$(DebuggeeConfiguration)', '$(NetCoreAppCurrent)'))</_PublishOutDir>
     </PropertyGroup>
-    <Exec Command="&quot;$(_DotNetExe)&quot; publish &quot;$(_DebuggeeCsproj)&quot; -c $(DebuggeeConfiguration) -f $(NetCoreAppCurrent) -r $(PortableTargetRid) --no-self-contained /p:PublishReadyToRun=true /p:RuntimeConfiguration=$(_DebuggeeRuntimeConfig) --nologo -o &quot;$(_PublishOutDir)&quot;" />
+    <Exec Command="&quot;$(_DotNetExe)&quot; publish &quot;$(_DebuggeeCsproj)&quot; -c $(DebuggeeConfiguration) -f $(NetCoreAppCurrent) -r $(PortableTargetRid) --no-self-contained /p:PublishReadyToRun=true /p:RuntimeConfiguration=$(_DebuggeeRuntimeConfig) --nologo -bl -o &quot;$(_PublishOutDir)&quot;" />
   </Target>
 
   <Target Name="_GenerateDumpsForDebuggee">
@@ -261,7 +261,7 @@
       <_DebuggeeCsproj>$([MSBuild]::NormalizePath('$(_DebuggeeDir)', '$(DebuggeeName).csproj'))</_DebuggeeCsproj>
     </PropertyGroup>
 
-    <Exec Command="&quot;$(_DotNetExe)&quot; publish &quot;$(_DebuggeeCsproj)&quot; -c $(DebuggeeConfiguration) -f $(NetCoreAppCurrent) -r $(PortableTargetRid) --no-self-contained /p:PublishReadyToRun=true /p:RuntimeConfiguration=$(_DebuggeeRuntimeConfig) --nologo -o &quot;$(_DebuggeeBinDir)&quot;"
+    <Exec Command="&quot;$(_DotNetExe)&quot; publish &quot;$(_DebuggeeCsproj)&quot; -c $(DebuggeeConfiguration) -f $(NetCoreAppCurrent) -r $(PortableTargetRid) --no-self-contained /p:PublishReadyToRun=true /p:RuntimeConfiguration=$(_DebuggeeRuntimeConfig) --nologo -bl -o &quot;$(_DebuggeeBinDir)&quot;"
           WorkingDirectory="$(_DebuggeeDir)" />
 
     <MakeDir Directories="$(_DumpDir)" />
