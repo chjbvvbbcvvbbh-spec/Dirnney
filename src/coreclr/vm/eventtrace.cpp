@@ -4422,7 +4422,7 @@ TADDR MethodAndStartAddressToEECodeInfoPointer(MethodDesc *pMethodDesc, PCODE pN
         return 0;
     }
 
-    start = GetInterpreterCodeFromInterpreterPrecodeIfPresent(start);
+    start = GetInterpreterCodeFromEntryPointIfPresent(start);
 
 #if defined(FEATURE_INTERPRETER) && defined(FEATURE_PORTABLE_ENTRYPOINTS)
     if (pNativeCodeStartAddress == (PCODE)0)
