@@ -99,6 +99,7 @@ internal sealed partial class ExecutionManagerCore<T> : IExecutionManager
         public abstract TargetPointer GetDebugInfo(RangeSection rangeSection, TargetCodePointer jittedCodeAddress, out bool hasFlagByte);
         public abstract void GetGCInfo(RangeSection rangeSection, TargetCodePointer jittedCodeAddress, out TargetPointer gcInfo, out uint gcVersion);
         public abstract void GetExceptionClauses(RangeSection rangeSection, CodeBlockHandle codeInfoHandle, out TargetPointer startAddr, out TargetPointer endAddr);
+        public abstract StubKind GetStubCodeBlockKind(RangeSection rangeSection, TargetCodePointer jittedCodeAddress);
     }
 
     private sealed class RangeSection
@@ -538,5 +539,15 @@ internal sealed partial class ExecutionManagerCore<T> : IExecutionManager
             });
         }
         return exceptionClauses;
+    }
+
+    public StubKind GetStubKind(TargetCodePointer jittedCodeAddress)
+    {
+        RangeSection range = RangeSection.Find(_target, _topRangeSectionMap, _rangeSectionMapLookup, jittedCodeAddress);
+        if (range.Data == null)
+            return StubKind.Unknown;
+
+        JitManager jitManager = GetJitManager(range.Data);
+        return jitManager.GetStubCodeBlockKind(range, jittedCodeAddress);
     }
 }

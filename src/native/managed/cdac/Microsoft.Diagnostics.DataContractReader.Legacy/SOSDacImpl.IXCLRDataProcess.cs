@@ -101,7 +101,93 @@ public sealed unsafe partial class SOSDacImpl : IXCLRDataProcess, IXCLRDataProce
         uint* nameLen,
         char* nameBuf,
         ClrDataAddress* displacement)
-        => LegacyFallbackHelper.CanFallback() && _legacyProcess is not null ? _legacyProcess.GetRuntimeNameByAddress(address, flags, bufLen, nameLen, nameBuf, displacement) : HResults.E_NOTIMPL;
+    {
+        int hr = HResults.S_OK;
+        try
+        {
+            if (flags != 0)
+                throw new ArgumentException("Flags are not supported", nameof(flags));
+
+            TargetCodePointer codeAddr = address.ToTargetCodePointer(_target);
+
+            // IsPossibleCodeAddress - validate the address is readable
+            if (!_target.TryRead(codeAddr, out byte _))
+                throw new ArgumentException("Address is not readable", nameof(address));
+
+            IExecutionManager eman = _target.Contracts.ExecutionManager;
+            string? resultName = null;
+
+            // Try stub classification
+            StubKind stubKind = eman.GetStubKind(codeAddr);
+            resultName = GetStubName(stubKind);
+
+            // try aux symbols
+            if (resultName is null && _target.Contracts.AuxiliarySymbols.TryGetAuxiliarySymbolName(address.ToTargetPointer(_target), out string? auxSymbolName))
+            {
+                resultName = auxSymbolName;
+            }
+
+            if (resultName is null)
+            {
+                throw new InvalidCastException();
+            }
+            else if (displacement is not null)
+            {
+                *displacement = 0;
+            }
+
+            OutputBufferHelpers.CopyStringToBuffer(nameBuf, bufLen, nameLen, resultName);
+
+            if (nameBuf is not null && bufLen < resultName.Length + 1)
+                hr = HResults.S_FALSE;
+        }
+        catch (System.Exception ex)
+        {
+            hr = ex.HResult;
+        }
+
+#if DEBUG
+        if (_legacyProcess is not null)
+        {
+            uint nameLenLocal = 0;
+            char[] nameBufLocal = new char[bufLen > 0 ? bufLen : 1];
+            ClrDataAddress displacementLocal = default;
+            int hrLocal;
+            fixed (char* pNameBufLocal = nameBufLocal)
+            {
+                hrLocal = _legacyProcess.GetRuntimeNameByAddress(
+                    address, flags, bufLen,
+                    &nameLenLocal,
+                    nameBuf is null ? null : pNameBufLocal,
+                    displacement is null ? null : &displacementLocal);
+            }
+
+            Debug.ValidateHResult(hr, hrLocal);
+            if (hr == HResults.S_OK || hr == HResults.S_FALSE)
+            {
+                Debug.Assert(nameLen is null || *nameLen == nameLenLocal);
+                if (nameBuf is not null)
+                {
+                    Debug.Assert(new ReadOnlySpan<char>(nameBuf, (int)nameLenLocal)
+                        .SequenceEqual(nameBufLocal.AsSpan(0, (int)nameLenLocal)));
+                }
+                if (displacement is not null)
+                {
+                    Debug.Assert(*displacement == displacementLocal);
+                }
+            }
+        }
+#endif
+
+        return hr;
+    }
+
+    private static string? GetStubName(Contracts.StubKind stubKind)
+    {
+        if (stubKind == Contracts.StubKind.Unknown)
+            return null;
+        return stubKind.ToString();
+    }
 
     int IXCLRDataProcess.StartEnumAppDomains(ulong* handle)
         => LegacyFallbackHelper.CanFallback() && _legacyProcess is not null ? _legacyProcess.StartEnumAppDomains(handle) : HResults.E_NOTIMPL;
