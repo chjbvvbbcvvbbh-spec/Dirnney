@@ -2,8 +2,9 @@
   <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.targets', '$(MSBuildThisFileDirectory)..\'))" />
 
   <!--
-    Force debuggees to use the locally-built crossgen2 (not the SDK's bundled
-    crossgen2 from global.json) when publishing with PublishReadyToRun=true.
+    Force debuggees to use the locally-built runtime/targeting packs and crossgen2
+    (not the SDK's bundled versions from global.json) when publishing with
+    PublishReadyToRun=true.
 
     Without this, the R2R compiler may reference types/signatures from a
     pre-release CoreLib that no longer exist at runtime (e.g. types removed
@@ -11,12 +12,16 @@
     R2R/runtime version-skew failures when the debuggee runs on the
     locally-built testhost.
 
-    See PR #127336 ("Optimize runtime async suspend/resume machinery") which
-    removed ExecutionAndSyncBlockStore: SDK preview3 crossgen2 still emits
-    R2R thunks referencing the removed type, causing dump tests to fail
-    against the post-#127336 runtime.
+    targetingpacks.targets handles runtime/targeting pack resolution.
+    tests.readytorun.targets overrides ResolveReadyToRunCompilers to use the
+    locally-built crossgen2 directly (the local build layout is flat, not the
+    NuGet pack "tools/" subdirectory layout the SDK expects).
   -->
   <Import Project="$(RepositoryEngineeringDir)targetingpacks.targets" />
+
+  <PropertyGroup>
+    <AfterMicrosoftNETSdkTargets>$(AfterMicrosoftNETSdkTargets);$(RepositoryEngineeringDir)testing\tests.readytorun.targets</AfterMicrosoftNETSdkTargets>
+  </PropertyGroup>
 
   <!-- Target invoked by GenerateAllDumps (from DumpTests.targets) on each debuggee csproj
        to extract the DumpTypes property. Returns the project name with DumpTypes metadata. -->
