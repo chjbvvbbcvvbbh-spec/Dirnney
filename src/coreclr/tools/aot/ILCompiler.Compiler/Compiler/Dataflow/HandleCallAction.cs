@@ -719,8 +719,40 @@ namespace ILLink.Shared.TrimAnalysis
             return true;
         }
 
+        private partial string GetAssemblyName(TypeProxy type)
+            => type.Type switch
+            {
+                ParameterizedType parameterizedType => GetAssemblyName(new TypeProxy(parameterizedType.ParameterType)),
+                FunctionPointerType functionPointerType => GetAssemblyName(new TypeProxy(functionPointerType.Signature.ReturnType)),
+                _ => ((MetadataType)type.Type.GetTypeDefinition()).Module.Assembly.GetName().Name,
+            };
+
+        private partial bool TryResolveTypeNameInAssemblyAndMark(string assemblyName, string typeName, out TypeProxy resolvedType)
+        {
+            if (!System.Reflection.Metadata.AssemblyNameInfo.TryParse(assemblyName, out var an)
+                || _callingMethod.Context.ResolveAssembly(an) is not ModuleDesc resolvedAssembly)
+            {
+                resolvedType = default;
+                return false;
+            }
+
+            // Note: the underlying resolver falls back to corelib for unqualified type names.
+            // Assembly.GetType only searches the receiver assembly at runtime, so this may over-resolve.
+            if (!_reflectionMarker.TryResolveTypeNameAndMark(resolvedAssembly, typeName, _diagnosticContext, "Reflection", out TypeDesc? foundType))
+            {
+                resolvedType = default;
+                return false;
+            }
+
+            resolvedType = new TypeProxy(foundType);
+            return true;
+        }
+
         private partial void MarkStaticConstructor(TypeProxy type)
             => _reflectionMarker.MarkStaticConstructor(_diagnosticContext.Origin, type.Type, _reason);
+
+        private partial void ReportRequiresUnreferencedCode(MethodProxy calledMethod)
+            => ReflectionMethodBodyScanner.CheckAndReportRequires(_diagnosticContext, calledMethod.Method, DiagnosticUtilities.RequiresUnreferencedCodeAttribute);
 
         private partial void MarkEventsOnTypeHierarchy(TypeProxy type, string name, BindingFlags? bindingFlags)
             => _reflectionMarker.MarkEventsOnTypeHierarchy(_diagnosticContext.Origin, type.Type, e => e.Name == name, _reason, bindingFlags);
