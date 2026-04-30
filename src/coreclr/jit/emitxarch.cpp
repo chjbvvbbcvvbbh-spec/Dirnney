@@ -10947,14 +10947,9 @@ void emitter::emitSetShortJump(instrDescJmp* id)
 /*****************************************************************************
  *
  *  Add a jmp instruction.
- *  When dst is NULL, instrCount specifies number of instructions
- *       to jump: positive is forward, negative is backward.
  */
 
-void emitter::emitIns_J(instruction ins,
-                        BasicBlock* dst,
-                        int         instrCount /* = 0 */,
-                        bool        isRemovableJmpCandidate /* = false */)
+void emitter::emitIns_J(instruction ins, BasicBlock* dst, bool isRemovableJmpCandidate /* = false */)
 {
 #ifdef TARGET_AMD64
     // Check emitter::emitLastIns before it is updated
@@ -10964,19 +10959,7 @@ void emitter::emitIns_J(instruction ins,
     UNATIVE_OFFSET sz;
     instrDescJmp*  id = emitNewInstrJmp();
 
-    if (dst != nullptr)
-    {
-        assert(dst->HasFlag(BBF_HAS_LABEL));
-        assert(instrCount == 0);
-    }
-    else
-    {
-        /* Only allow non-label jmps in prolog */
-        assert(emitPrologIG);
-        assert(emitPrologIG == emitCurIG);
-        assert(instrCount != 0);
-    }
-
+    assert(dst->HasFlag(BBF_HAS_LABEL));
     id->idIns(ins);
     id->idInsFmt(IF_LABEL);
 
@@ -11004,24 +10987,12 @@ void emitter::emitIns_J(instruction ins,
         id->idjIsRemovableJmpCandidate = 0;
     }
 
-    id->idjShort = 0;
-    if (dst != nullptr)
-    {
-        /* Assume the jump will be long */
-        id->idAddr()->iiaBBlabel = dst;
-        id->idjKeepLong          = m_compiler->fgInDifferentRegions(m_compiler->compCurBB, dst);
-    }
-    else
-    {
-        id->idAddr()->iiaSetInstrCount(instrCount);
-        id->idjKeepLong = false;
-        /* This jump must be short */
-        emitSetShortJump(id);
-        id->idSetIsBound();
-    }
+    /* Assume the jump will be long */
+    id->idjShort             = 0;
+    id->idAddr()->iiaBBlabel = dst;
+    id->idjKeepLong          = m_compiler->fgInDifferentRegions(m_compiler->compCurBB, dst);
 
     /* Record the jump's IG and offset within it */
-
     id->idjIG   = emitCurIG;
     id->idjOffs = emitCurIGsize;
 
@@ -14035,14 +14006,7 @@ void emitter::emitDispIns(
 
             if (id->idIsBound())
             {
-                if (id->idAddr()->iiaHasInstrCount())
-                {
-                    printf("%3d instr", id->idAddr()->iiaGetInstrCount());
-                }
-                else
-                {
-                    emitPrintLabel(id->idAddr()->iiaIGlabel);
-                }
+                emitPrintLabel(id->idAddr()->iiaIGlabel);
             }
             else
             {
@@ -14082,7 +14046,7 @@ void emitter::emitDispIns(
                 // targetIG is only set for 1st of the series of align instruction
                 if ((alignInstrId->idaLoopHeadPredIG != nullptr) && (alignInstrId->loopHeadIG() != nullptr))
                 {
-                    printf(" for IG%02u", alignInstrId->loopHeadIG()->igNum);
+                    printf(" for IG%02u", alignInstrId->loopHeadIG()->GetDisplayId());
                 }
                 printf("]");
             }
@@ -17783,27 +17747,11 @@ BYTE* emitter::emitOutputLJ(insGroup* ig, BYTE* dst, instrDesc* i)
     srcOffs = emitCurCodeOffs(dst);
     srcAddr = emitOffsetToPtr(srcOffs);
 
-    if (id->idAddr()->iiaHasInstrCount())
+    dstOffs = id->idAddr()->iiaIGlabel->igOffs;
+    dstAddr = emitOffsetToPtr(dstOffs);
+    if (!relAddr)
     {
-        assert(ig != nullptr);
-        int      instrCount = id->idAddr()->iiaGetInstrCount();
-        unsigned insNum     = emitFindInsNum(ig, id);
-        if (instrCount < 0)
-        {
-            // Backward branches using instruction count must be within the same instruction group.
-            assert(insNum + 1 >= (unsigned)(-instrCount));
-        }
-        dstOffs = ig->igOffs + emitFindOffset(ig, (insNum + 1 + instrCount));
-        dstAddr = emitOffsetToPtr(dstOffs);
-    }
-    else
-    {
-        dstOffs = id->idAddr()->iiaIGlabel->igOffs;
-        dstAddr = emitOffsetToPtr(dstOffs);
-        if (!relAddr)
-        {
-            srcAddr = nullptr;
-        }
+        srcAddr = nullptr;
     }
 
     distVal = (ssize_t)(dstAddr - srcAddr);
@@ -20115,9 +20063,8 @@ size_t emitter::emitOutputInstr(insGroup* ig, instrDesc* id, BYTE** dp)
 #endif
 
 #if FEATURE_LOOP_ALIGN
-    // Only compensate over-estimated instructions if emitCurIG is before
-    // the last IG that needs alignment.
-    if (emitCurIG->igNum <= emitLastAlignedIgNum)
+    // Only compensate over-estimated instructions if emitCurIG is before the last IG that needs alignment.
+    if ((emitLastAlignedIG != nullptr) && emitCurIG->IsBeforeOrEqual(emitLastAlignedIG))
     {
         int diff = id->idCodeSize() - ((UNATIVE_OFFSET)(dst - *dp));
         assert(diff >= 0);

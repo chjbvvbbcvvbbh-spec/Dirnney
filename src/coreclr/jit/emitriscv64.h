@@ -186,7 +186,6 @@ bool emitDispBranch(unsigned         opcode2,
                     const instrDesc* id,
                     const insGroup*  ig,
                     bool             printOffsetPlaceholder) const;
-void emitDispBranchOffset(const instrDesc* id, const insGroup* ig, bool printOffsetPlaceholder) const;
 void emitDispBranchLabel(const instrDesc* id) const;
 bool emitDispBranchInstrType(unsigned opcode2, bool is_zero_reg, bool& print_second_reg) const;
 void emitDispIllegalInstruction(code_t instructionCode);
@@ -208,10 +207,6 @@ void emitInsLoadStoreOp(instruction ins, emitAttr attr, regNumber dataReg, GenTr
 unsigned emitOutput_Instr(BYTE* dst, code_t code) const;
 
 ssize_t emitOutputInstrJumpDistance(const BYTE* src, const insGroup* ig, instrDescJmp* jmp);
-void    emitOutputInstrJumpDistanceHelper(const insGroup* ig,
-                                          instrDescJmp*   jmp,
-                                          UNATIVE_OFFSET& dstOffs,
-                                          const BYTE*&    dstAddr) const;
 
 // Method to do check if mov is redundant with respect to the last instruction.
 // If yes, the caller of this method can choose to omit current mov instruction.
