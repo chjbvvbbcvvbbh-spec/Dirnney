@@ -46,6 +46,7 @@
 #include "sigbuilder.h"
 #include "openum.h"
 #include "fieldmarshaler.h"
+#include "pregeneratedstringthunks.h"
 #ifdef HAVE_GCCOVER
 #include "gccover.h"
 #endif // HAVE_GCCOVER
@@ -14742,6 +14743,15 @@ BOOL LoadDynamicInfoEntry(Module *currentModule,
             }
             break;
         }
+
+    case READYTORUN_FIXUP_InjectStringThunks:
+        {
+            ReadyToRunInfo * pR2RInfo = currentModule->GetReadyToRunInfo();
+            ProcessInjectStringThunksFixup(pR2RInfo, pBlob);
+            result = 1;
+        }
+        break;
+
     default:
         STRESS_LOG1(LF_ZAP, LL_WARNING, "Unknown ReadyToRunFixupKind %d\n", kind);
         _ASSERTE(!"Unknown ReadyToRunFixupKind");
