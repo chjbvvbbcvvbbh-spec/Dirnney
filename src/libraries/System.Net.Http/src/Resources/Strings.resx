@@ -342,6 +342,9 @@
   <data name="net_http_invalid_response_header_name" xml:space="preserve">
     <value>Received an invalid header name: '{0}'.</value>
   </data>
+  <data name="net_http_invalid_response_content_length" xml:space="preserve">
+    <value>The response contained an invalid or conflicting Content-Length header.</value>
+  </data>
   <data name="net_http_request_aborted" xml:space="preserve">
     <value>The request was aborted.</value>
   </data>
