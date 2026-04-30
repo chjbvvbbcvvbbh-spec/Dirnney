@@ -326,7 +326,7 @@ namespace Microsoft.Win32.SafeHandles
                     resolvedFilename, argv, env, cwd,
                     setCredentials, userId, groupId, groups,
                     out childPid, stdinHandle, stdoutHandle, stderrHandle,
-                    startInfo.StartDetached, inheritedHandles);
+                    startInfo.StartDetached, OperatingSystem.IsLinux() ? startInfo.KillOnParentExit : false, inheritedHandles);
 
                 if (errno == 0)
                 {
