@@ -1449,6 +1449,7 @@ public:
     void SetCodeEntryPoint(PCODE entryPoint);
 #ifdef FEATURE_TIERED_COMPILATION
     void ResetCodeEntryPoint();
+    void SetBackpatchableEntryPoint(PCODE entryPoint, bool isFinalTier, BOOL fOnlyRedirectFromPrestub = FALSE);
 #endif // FEATURE_TIERED_COMPILATION
     void ResetCodeEntryPointForEnC();
 
