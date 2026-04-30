@@ -251,6 +251,11 @@ void CodeGen::genPopCalleeSavedRegistersAndFreeLclFrame(bool jmpEpilog)
         }
     }
 
+    if (JitConfig.JitPacEnabled() != 0)
+    {
+        GetEmitter()->emitPacInEpilog();
+    }
+
     // For OSR, we must also adjust the SP to remove the Tier0 frame.
     //
     if (m_compiler->opts.IsOSR())
@@ -487,12 +492,13 @@ void CodeGen::genPrologSaveRegPair(regNumber reg1,
 
         if ((spOffset == 0) && (spDelta >= -512))
         {
-            // We can use pre-indexed addressing.
+            // We can use pre-indexed addressing when the stack adjustment fits in the instruction.
+            // Generate:
             // stp REG, REG + 1, [SP, #spDelta]!
             // 64-bit STP offset range: -512 to 504, multiple of 8.
+            assert(reg1 != REG_LR);
             GetEmitter()->emitIns_R_R_R_I(INS_stp, EA_PTRSIZE, reg1, reg2, REG_SPBASE, spDelta, INS_OPTS_PRE_INDEX);
             m_compiler->unwindSaveRegPairPreindexed(reg1, reg2, spDelta);
-
             needToSaveRegs = false;
         }
         else // (spOffset != 0) || (spDelta < -512)
@@ -511,6 +517,8 @@ void CodeGen::genPrologSaveRegPair(regNumber reg1,
         // 64-bit STP offset range: -512 to 504, multiple of 8.
         assert(spOffset <= 504);
         assert((spOffset % 8) == 0);
+        assert(reg1 != REG_LR);
+
         GetEmitter()->emitIns_R_R_R_I(INS_stp, EA_PTRSIZE, reg1, reg2, REG_SPBASE, spOffset);
 
         if (TargetOS::IsUnix && m_compiler->generateCFIUnwindCodes())
@@ -622,6 +630,7 @@ void CodeGen::genRestoreRegPair(regNumber reg1,
     assert((spDelta % 16) == 0);                                  // SP changes must be 16-byte aligned
     assert(genIsValidFloatReg(reg1) == genIsValidFloatReg(reg2)); // registers must be both general-purpose, or both
                                                                   // FP/SIMD
+    assert(reg1 != REG_LR);
 
     if (spDelta != 0)
     {
@@ -1384,6 +1393,11 @@ void CodeGen::genFuncletProlog(BasicBlock* block)
 
     m_compiler->unwindBegProlog();
 
+    if (JitConfig.JitPacEnabled() != 0)
+    {
+        GetEmitter()->emitPacInProlog();
+    }
+
     regMaskTP maskSaveRegsFloat = genFuncletInfo.fiSaveRegs & RBM_ALLFLOAT;
     regMaskTP maskSaveRegsInt   = genFuncletInfo.fiSaveRegs & ~maskSaveRegsFloat;
 
@@ -1590,7 +1604,6 @@ void CodeGen::genFuncletEpilog(BasicBlock* /* block */)
         {
             GetEmitter()->emitIns_R_R_R_I(INS_ldp, EA_PTRSIZE, REG_FP, REG_LR, REG_SPBASE, 0);
             m_compiler->unwindSaveRegPair(REG_FP, REG_LR, 0);
-
             genStackPointerAdjustment(-genFuncletInfo.fiSpDelta1, REG_SCRATCH, nullptr, /* reportUnwindData */ true);
         }
         else
@@ -1621,7 +1634,6 @@ void CodeGen::genFuncletEpilog(BasicBlock* /* block */)
     else if (genFuncletInfo.fiFrameType == 3)
     {
         // With OSR we may see large values for fiSpDelta1
-        //
         if (m_compiler->opts.IsOSR())
         {
             GetEmitter()->emitIns_R_R_R_I(INS_ldp, EA_PTRSIZE, REG_FP, REG_LR, REG_SPBASE, 0);
@@ -1667,6 +1679,11 @@ void CodeGen::genFuncletEpilog(BasicBlock* /* block */)
             assert(genFuncletInfo.fiSpDelta1 >= -240);
             genStackPointerAdjustment(-genFuncletInfo.fiSpDelta1, REG_NA, nullptr, /* reportUnwindData */ true);
         }
+    }
+
+    if (JitConfig.JitPacEnabled() != 0)
+    {
+        GetEmitter()->emitPacInEpilog();
     }
 
     inst_RV(INS_ret, REG_LR, TYP_I_IMPL);
@@ -5674,6 +5691,18 @@ void CodeGen::genOSRHandleTier0CalleeSavedRegistersAndFrame()
     // pointer chaining purposes, so restoring them is trivial.
     genRestoreRegPair(REG_FP, REG_LR, REG_FP, 0, 0, false, REG_IP1, nullptr,
                       /* reportUnwindData */ false);
+
+    if (JitConfig.JitPacEnabled() != 0)
+    {
+        // Tier0 signed LR with the Tier0 caller SP before allocating its frame.
+        // Recreate that SP from the current Tier0 body SP so we can authenticate
+        // LR before the OSR prolog later re-signs it with the OSR SP via PACIASP.
+        genInstrWithConstant(INS_add, EA_PTRSIZE, REG_IP0, REG_SPBASE, patchpointInfo->TotalFrameSize(), REG_IP0,
+                             /* inUnwindRegion */ false);
+        GetEmitter()->emitIns_Mov(INS_mov, EA_PTRSIZE, REG_IP1, REG_LR, /* canSkip */ false);
+        GetEmitter()->emitIns(INS_autia1716);
+        GetEmitter()->emitIns_Mov(INS_mov, EA_PTRSIZE, REG_LR, REG_IP1, /* canSkip */ false);
+    }
 
     // Emit phantom unwind data for the tier0 frame.
     m_compiler->unwindAllocStack(patchpointInfo->TotalFrameSize());
