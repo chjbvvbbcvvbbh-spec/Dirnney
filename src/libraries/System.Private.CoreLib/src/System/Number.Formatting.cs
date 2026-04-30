@@ -1,6 +1,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Buffers;
 using System.Buffers.Text;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -330,6 +331,72 @@ namespace System
             ref MemoryMarshal.GetReference(useChars ? TwoDigitsCharsAsBytes : TwoDigitsBytes);
 #endif
 
+        public static string FormatDecimalIeee754<TDecimal, TValue>(TValue value, string? format, NumberFormatInfo info)
+            where TDecimal : unmanaged, IDecimalIeee754ParseAndFormatInfo<TDecimal, TValue>
+            where TValue : unmanaged, IBinaryInteger<TValue>
+        {
+            var vlb = new ValueListBuilder<char>(stackalloc char[CharStackBufferSize]);
+            string result = FormatDecimalIeee754<TDecimal, TValue, char>(ref vlb, value, format, info) ?? vlb.AsSpan().ToString();
+            vlb.Dispose();
+            return result;
+        }
+
+        private static string? FormatDecimalIeee754<TDecimal, TValue, TChar>(ref ValueListBuilder<TChar> vlb, TValue value, ReadOnlySpan<char> format, NumberFormatInfo info)
+            where TDecimal : unmanaged, IDecimalIeee754ParseAndFormatInfo<TDecimal, TValue>
+            where TValue : unmanaged, IBinaryInteger<TValue>
+            where TChar : unmanaged, IUtfChar<TChar>
+        {
+            Debug.Assert(typeof(TChar) == typeof(char) || typeof(TChar) == typeof(byte));
+
+            if (!TDecimal.IsFinite(value))
+            {
+                if (TDecimal.IsNaN(value))
+                {
+                    if (typeof(TChar) == typeof(char))
+                    {
+                        return info.NaNSymbol;
+                    }
+                    else
+                    {
+                        vlb.Append(info.NaNSymbolTChar<TChar>());
+                        return null;
+                    }
+                }
+
+                if (typeof(TChar) == typeof(char))
+                {
+                    return TDecimal.IsNegative(value) ? info.NegativeInfinitySymbol : info.PositiveInfinitySymbol;
+                }
+                else
+                {
+                    vlb.Append(TDecimal.IsNegative(value) ? info.NegativeInfinitySymbolTChar<TChar>() : info.PositiveInfinitySymbolTChar<TChar>());
+                    return null;
+                }
+            }
+            char fmt = ParseFormatSpecifier(format, out int digits);
+            byte[] buffer = ArrayPool<byte>.Shared.Rent(TDecimal.BufferLength);
+
+            NumberBuffer number = new NumberBuffer(NumberBufferKind.Decimal, buffer);
+
+            DecimalIeee754ToNumber<TDecimal, TValue>(value, ref number);
+
+            if (fmt != 0)
+            {
+                NumberToString(ref vlb, ref number, fmt, digits, info);
+            }
+            else
+            {
+                NumberToStringFormat(ref vlb, ref number, format, info);
+            }
+
+            string result = vlb.AsSpan().ToString();
+            vlb.Dispose();
+            if (buffer != null)
+            {
+                ArrayPool<byte>.Shared.Return(buffer);
+            }
+            return result;
+        }
 
         public static unsafe string FormatDecimal(decimal value, ReadOnlySpan<char> format, NumberFormatInfo info)
         {
@@ -383,6 +450,47 @@ namespace System
             bool success = vlb.TryCopyTo(destination, out charsWritten);
             vlb.Dispose();
             return success;
+        }
+
+        internal static void DecimalIeee754ToNumber<TDecimal, TValue>(TValue value, ref NumberBuffer number)
+            where TDecimal : unmanaged, IDecimalIeee754ParseAndFormatInfo<TDecimal, TValue>
+            where TValue : unmanaged, IBinaryInteger<TValue>
+        {
+            DecodedDecimalIeee754<TValue> unpackDecimal = Number.UnpackDecimalIeee754<TDecimal, TValue>(value);
+            number.IsNegative = unpackDecimal.Signed;
+
+            if (TValue.IsZero(unpackDecimal.Significand))
+            {
+                number.Scale = unpackDecimal.UnbiasedExponent < 0 ? unpackDecimal.UnbiasedExponent : 0;
+                return;
+            }
+
+            string significand = TDecimal.ToDecStr(unpackDecimal.Significand);
+
+            for (int i = 0; i < significand.Length; i++)
+            {
+                number.Digits[i] = (byte)significand[i];
+            }
+
+            number.Scale = TValue.IsZero(unpackDecimal.Significand) ? 0 : significand.Length + unpackDecimal.UnbiasedExponent;
+
+            if (unpackDecimal.UnbiasedExponent > 0)
+            {
+                number.DigitsCount = significand.Length + unpackDecimal.UnbiasedExponent;
+
+                for (int i = 0; i < unpackDecimal.UnbiasedExponent; i++)
+                {
+                    number.Digits[significand.Length + i] = (byte)'0';
+                }
+            }
+            else
+            {
+                number.DigitsCount = significand.Length;
+            }
+
+            number.Digits[number.DigitsCount] = (byte)'\0';
+
+            number.CheckConsistency();
         }
 
         internal static unsafe void DecimalToNumber(scoped ref decimal d, ref NumberBuffer number)
@@ -1804,7 +1912,7 @@ namespace System
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static unsafe void UInt32ToNumber(uint value, ref NumberBuffer number)
+        internal static unsafe void UInt32ToNumber(uint value, ref NumberBuffer number)
         {
             number.DigitsCount = UInt32Precision;
             number.IsNegative = false;
@@ -2276,7 +2384,7 @@ namespace System
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static unsafe void UInt64ToNumber(ulong value, ref NumberBuffer number)
+        internal static unsafe void UInt64ToNumber(ulong value, ref NumberBuffer number)
         {
             number.DigitsCount = UInt64Precision;
             number.IsNegative = false;
@@ -2692,7 +2800,7 @@ namespace System
             }
         }
 
-        private static unsafe void UInt128ToNumber(UInt128 value, ref NumberBuffer number)
+        internal static unsafe void UInt128ToNumber(UInt128 value, ref NumberBuffer number)
         {
             number.DigitsCount = UInt128Precision;
             number.IsNegative = false;
