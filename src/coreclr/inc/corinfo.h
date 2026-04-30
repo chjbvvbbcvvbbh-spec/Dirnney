@@ -1151,7 +1151,6 @@ struct CORINFO_CONST_LOOKUP
     //     IAT_PVALUE    --> "addr" stores a pointer to a location which will hold the real handle
     //     IAT_RELPVALUE --> "addr" stores a relative pointer to a location which will hold the real handle
     //     IAT_PPVALUE   --> "addr" stores a double indirection to a location which will hold the real handle
-
     InfoAccessType              accessType;
     union
     {
@@ -1598,17 +1597,15 @@ struct CORINFO_DEVIRTUALIZATION_INFO
     // - details on the computation done by the jit host
     // - If pResolvedTokenDevirtualizedMethod is not set to NULL and targeting an R2R image
     //   use it as the parameter to getCallInfo
-    // - isInstantiatingStub is set to TRUE if the devirtualized method is a generic method instantiating stub
-    // - needsMethodContext is set TRUE if the devirtualized method may require a method context
-    //     (in which case the method handle and context will be a generic method)
+    // - instParamLookup contains all the information necessary to pass the instantiation parameter for
+    //   the devirtualized method. A constant lookup with IAT_VALUE with a nullptr handle indicates no instantiation parameter is needed.
     //
     CORINFO_METHOD_HANDLE           devirtualizedMethod;
     CORINFO_CONTEXT_HANDLE          exactContext;
     CORINFO_DEVIRTUALIZATION_DETAIL detail;
     CORINFO_RESOLVED_TOKEN          resolvedTokenDevirtualizedMethod;
     CORINFO_RESOLVED_TOKEN          resolvedTokenDevirtualizedUnboxedMethod;
-    bool                            isInstantiatingStub;
-    bool                            needsMethodContext;
+    CORINFO_LOOKUP                  instParamLookup;
 };
 
 //----------------------------------------------------------------------------

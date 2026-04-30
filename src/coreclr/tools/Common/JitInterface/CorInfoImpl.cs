@@ -1351,8 +1351,7 @@ namespace Internal.JitInterface
             info->devirtualizedMethod = null;
             info->exactContext = null;
             info->detail = CORINFO_DEVIRTUALIZATION_DETAIL.CORINFO_DEVIRTUALIZATION_UNKNOWN;
-            info->isInstantiatingStub = false;
-            info->needsMethodContext = false;
+            info->instParamLookup = default(CORINFO_LOOKUP);
 
             TypeDesc objType = HandleToObject(info->objClass);
 
@@ -1497,7 +1496,6 @@ namespace Internal.JitInterface
 #endif
             info->detail = CORINFO_DEVIRTUALIZATION_DETAIL.CORINFO_DEVIRTUALIZATION_SUCCESS;
             info->devirtualizedMethod = ObjectToHandle(impl);
-            info->isInstantiatingStub = false;
             info->exactContext = contextFromType(owningType);
 
             return true;
