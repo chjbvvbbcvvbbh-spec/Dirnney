@@ -10,17 +10,11 @@ namespace System.Threading
     internal sealed partial class PortableThreadPool
     {
         /// <summary>
-        /// The worker thread infastructure for the CLR thread pool.
+        /// The worker thread infrastructure for the CLR thread pool.
         /// </summary>
         private static partial class WorkerThread
         {
             private static readonly short ThreadsToKeepAlive = DetermineThreadsToKeepAlive();
-
-            // Spinning in the threadpool semaphore is not always useful.
-            // For example the new workitems may be produced by non-pool threads and could only arrive if pool threads start blocking.
-            // We will limit spinning to roughly 512-1024 spinwaits, each taking 35-50ns. That should be under 50 usec total.
-            // For reference the wakeup latency of a futex/event with threads queued up is reported to be in 5-50 usec range. (year 2025)
-            private const int SemaphoreSpinCountDefault = 9;
 
             // This value represents an assumption of how much uncommitted stack space a worker thread may use in the future.
             // Used in calculations to estimate when to throttle the rate of thread injection to reduce the possibility of
@@ -48,11 +42,6 @@ namespace System.Threading
             private static readonly LowLevelLifoSemaphore s_semaphore =
                 new LowLevelLifoSemaphore(
                     MaxPossibleThreadCount,
-                    (uint)AppContextConfigHelper.GetInt32ComPlusOrDotNetConfig(
-                        "System.Threading.ThreadPool.UnfairSemaphoreSpinLimit",
-                        "ThreadPool_UnfairSemaphoreSpinLimit",
-                        SemaphoreSpinCountDefault,
-                        false),
                     onWait: () =>
                     {
                         if (NativeRuntimeEventSource.Log.IsEnabled())
@@ -116,9 +105,14 @@ namespace System.Threading
 
                 while (true)
                 {
-                    while (semaphore.Wait(timeoutMs))
+                    bool spuriousRequest = false;
+                    while (true)
                     {
-                        WorkerDoWork(threadPoolInstance);
+                        bool signaled = spuriousRequest ? semaphore.WaitNoSpin(timeoutMs) : semaphore.Wait(timeoutMs);
+                        if (!signaled)
+                            break;
+
+                        WorkerDoWork(threadPoolInstance, out spuriousRequest);
                     }
 
                     // We've timed out waiting on the semaphore. Time to exit.
@@ -130,7 +124,7 @@ namespace System.Threading
                 }
             }
 
-            private static void WorkerDoWork(PortableThreadPool threadPoolInstance)
+            private static void WorkerDoWork(PortableThreadPool threadPoolInstance, out bool spuriousRequest)
             {
                 do
                 {
@@ -142,11 +136,25 @@ namespace System.Threading
                     {
                         // We took the request, now we must Dispatch some work items.
                         threadPoolInstance.NotifyDispatchProgress(Environment.TickCount);
-                        if (!ThreadPoolWorkQueue.Dispatch())
+                        switch (ThreadPoolWorkQueue.Dispatch())
                         {
-                            // We are above goal and would have already removed this working worker in the counts.
-                            return;
+                            case ThreadPoolWorkQueue.DispatchResult.Spurious:
+                                spuriousRequest = true;
+                                break;
+
+                            case ThreadPoolWorkQueue.DispatchResult.ShouldStop:
+                                spuriousRequest = false;
+                                // We are above goal and this  worker is already removed in the counts.
+                                return;
+
+                            default:
+                                spuriousRequest = false;
+                                break;
                         }
+                    }
+                    else
+                    {
+                        spuriousRequest = true;
                     }
 
                     // We could not find more work in the queue and will try to stop being active.
