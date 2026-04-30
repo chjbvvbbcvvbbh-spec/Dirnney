@@ -633,6 +633,8 @@ protected:
     void genAmd64EmitterUnitTestsApx();
     void genAmd64EmitterUnitTestsAvx10v2();
     void genAmd64EmitterUnitTestsCCMP();
+    void genAmd64EmitterUnitTestsCFCMOV();
+    void genAmd64EmitterUnitTestsCTEST();
 #endif
 
 #endif // defined(DEBUG)
@@ -1648,9 +1650,11 @@ public:
     static insOpts ShiftOpToInsOpts(genTreeOps op);
 #elif defined(TARGET_XARCH)
     static instruction JumpKindToCmov(emitJumpKind condition);
+#ifdef TARGET_AMD64
     static instruction JumpKindToCcmp(emitJumpKind condition);
     static insOpts     OptsFromCFlags(insCflags flags);
-#endif
+#endif // TARGET_AMD64
+#endif // TARGET_XARCH
     void inst_JCC(GenCondition condition, BasicBlock* target);
     void inst_SETCC(GenCondition condition, var_types type, regNumber dstReg);
 
