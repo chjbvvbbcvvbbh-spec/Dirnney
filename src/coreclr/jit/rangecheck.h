@@ -479,6 +479,46 @@ struct RangeOps
         return Range(Limit(Limit::keUnknown));
     }
 
+    static Range Xor(const Range& r1, const Range& r2)
+    {
+        int  r1ConstVal;
+        int  r2ConstVal;
+        bool r1IsConstVal = r1.IsSingleValueConstant(&r1ConstVal);
+        bool r2IsConstVal = r2.IsSingleValueConstant(&r2ConstVal);
+
+        // Both ranges are single constant values.
+        // Example: [5..5] ^ [3..3] = [6..6]
+        if (r1IsConstVal && r2IsConstVal)
+        {
+            return Range(Limit(Limit::keConstant, r1ConstVal ^ r2ConstVal));
+        }
+
+        auto isSubToXorValid = [=](uint64_t cns, Range range) {
+            uint64_t lo        = (uint64_t)range.LowerLimit().GetConstant();
+            uint64_t hi        = (uint64_t)range.UpperLimit().GetConstant();
+            uint64_t knownBits = BitOperations::BitsetFromRange(lo, hi);
+
+            // Zero out bits outside of TYPE. This handles cases that rely on overflow (int.MaxValue - x)
+            uint32_t sizeInBits = genTypeSize(TYP_INT) * BITS_PER_BYTE;
+            knownBits &= (1ULL << (sizeInBits - 1)) - 1;
+
+            // Can sub be perfomed without carry?
+            return (cns & knownBits) == knownBits;
+        };
+
+        // Example: [3..5] ^ [-1..-1] = [-6..-4]
+        if (r1IsConstVal && r2.IsConstantRange() && isSubToXorValid(r1ConstVal, r2))
+        {
+            return Subtract(r1, r2);
+        }
+        if (r2IsConstVal && r1.IsConstantRange() && isSubToXorValid(r2ConstVal, r1))
+        {
+            return Subtract(r2, r1);
+        }
+
+        return Range(Limit(Limit::keUnknown));
+    }
+
     static Range UnsignedMod(const Range& r1, const Range& r2)
     {
         // For X UMOD Y we only handle the case when Y is a fixed positive constant.
@@ -659,6 +699,12 @@ struct RangeOps
         result.lLimit = Limit(Limit::keConstant, -hi);
         result.uLimit = Limit(Limit::keConstant, -lo);
         return result;
+    }
+
+    static Range Not(const Range& range)
+    {
+        Range cns = Limit(Limit::keConstant, -1);
+        return Subtract(cns, range);
     }
 
     //------------------------------------------------------------------------

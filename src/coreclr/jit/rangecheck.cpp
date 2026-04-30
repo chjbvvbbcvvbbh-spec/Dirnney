@@ -736,9 +736,23 @@ Range RangeCheck::GetRangeFromAssertionsWorker(
             break;
 
             case VNF_NEG:
+            case VNF_NOT:
             {
                 Range r1 = GetRangeFromAssertionsWorker(comp, funcApp.m_args[0], assertions, --budget, visited);
-                Range unaryOpResult = RangeOps::Negate(r1);
+                Range unaryOpResult = Range(Limit(Limit::keUnknown));
+                switch (funcApp.m_func)
+                {
+                    case VNF_NEG:
+                        unaryOpResult = RangeOps::Negate(r1);
+                        break;
+
+                    case VNF_NOT:
+                        unaryOpResult = RangeOps::Not(r1);
+                        break;
+
+                    default:
+                        unreached();
+                }
 
                 // We can use the result only if it never overflows.
                 result = unaryOpResult.IsConstantRange() ? unaryOpResult : result;
@@ -751,6 +765,7 @@ Range RangeCheck::GetRangeFromAssertionsWorker(
             case VNF_SUB:
             case VNF_AND:
             case VNF_OR:
+            case VNF_XOR:
             case VNF_RSH:
             case VNF_RSZ:
             case VNF_UMOD:
@@ -775,6 +790,9 @@ Range RangeCheck::GetRangeFromAssertionsWorker(
                         break;
                     case VNF_OR:
                         binOpResult = RangeOps::Or(r1, r2);
+                        break;
+                    case VNF_XOR:
+                        binOpResult = RangeOps::Xor(r1, r2);
                         break;
                     case VNF_LSH:
                         binOpResult = RangeOps::ShiftLeft(r1, r2);
@@ -1553,7 +1571,9 @@ Range RangeCheck::ComputeRangeForBinOp(BasicBlock* block, GenTreeOp* binop, bool
 {
     assert(binop->OperIs(GT_ADD, GT_OR, GT_XOR, GT_AND, GT_RSH, GT_RSZ, GT_LSH, GT_UMOD, GT_MUL));
 
-    // For XOR we only care about Log2 pattern for now
+    // To handle the Log2 pattern of "63 ^ LZCNT(x | 1)" we are missing precise
+    // range info for "LZCNT(x | 1)" (should be [0, 63]) and 64bit support. Special case it:
+    // https://github.com/dotnet/runtime/pull/113790
     if (binop->OperIs(GT_XOR))
     {
         int upperBound;
@@ -1562,7 +1582,6 @@ Range RangeCheck::ComputeRangeForBinOp(BasicBlock* block, GenTreeOp* binop, bool
             assert(upperBound > 0);
             return Range(Limit(Limit::keConstant, 0), Limit(Limit::keConstant, upperBound));
         }
-        return Range(Limit(Limit::keUnknown));
     }
 
     GenTree* op1 = binop->gtGetOp1();
@@ -1631,6 +1650,9 @@ Range RangeCheck::ComputeRangeForBinOp(BasicBlock* block, GenTreeOp* binop, bool
             break;
         case GT_OR:
             r = RangeOps::Or(op1Range, op2Range);
+            break;
+        case GT_XOR:
+            r = RangeOps::Xor(op1Range, op2Range);
             break;
         case GT_UMOD:
             r = RangeOps::UnsignedMod(op1Range, op2Range);
@@ -1964,13 +1986,8 @@ bool RangeCheck::ComputeDoesOverflow(BasicBlock* block, GenTree* expr, const Ran
         overflows = DoesBinOpOverflow(block, expr->AsOp(), range);
     }
     // These operators don't overflow.
-    else if (expr->OperIs(GT_AND, GT_RSH, GT_RSZ, GT_UMOD, GT_NEG))
+    else if (expr->OperIs(GT_AND, GT_RSH, GT_RSZ, GT_UMOD, GT_NEG, GT_XOR, GT_NOT))
     {
-        overflows = false;
-    }
-    else if (expr->OperIs(GT_XOR) && vnStore->IsVNLog2(m_compiler->vnStore->VNConservativeNormalValue(expr->gtVNPair)))
-    {
-        // For XOR we only care about Log2 pattern for now, which never overflows.
         overflows = false;
     }
     // Walk through phi arguments to check if phi arguments involve arithmetic that overflows.
@@ -2069,6 +2086,12 @@ Range RangeCheck::ComputeRange(BasicBlock* block, GenTree* expr, bool monIncreas
         // Compute range for negation, e.g.: [0..8] -> [-8..0]
         Range op1Range = GetRangeWorker(block, expr->gtGetOp1(), monIncreasing DEBUGARG(indent + 1));
         range          = RangeOps::Negate(op1Range);
+    }
+    else if (expr->OperIs(GT_NOT))
+    {
+        // Compute range for not, e.g: [2, 8] -> [-9..-3]
+        Range op1Range = GetRangeWorker(block, expr->gtGetOp1(), monIncreasing DEBUGARG(indent + 1));
+        range          = RangeOps::Not(op1Range);
     }
     // If phi, then compute the range for arguments, calling the result "dependent" when looping begins.
     else if (expr->OperIs(GT_PHI))
