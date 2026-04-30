@@ -665,10 +665,12 @@ class EEFileLoadException : public EEException
   private:
     SString m_name;
     HRESULT m_hr;
+    SString m_diagnosticInfo;
 
   public:
 
     EEFileLoadException(const SString &name, HRESULT hr, Exception *pInnerException = NULL);
+    EEFileLoadException(const SString &name, HRESULT hr, const SString &diagnosticInfo, Exception *pInnerException = NULL);
     ~EEFileLoadException();
 
     // virtual overrides
@@ -683,6 +685,7 @@ class EEFileLoadException : public EEException
 
     static RuntimeExceptionKind GetFileLoadKind(HRESULT hr);
     static void DECLSPEC_NORETURN Throw(AssemblySpec *pSpec, HRESULT hr, Exception *pInnerException = NULL);
+    static void DECLSPEC_NORETURN Throw(AssemblySpec *pSpec, HRESULT hr, const SString &diagnosticInfo, Exception *pInnerException = NULL);
     static void DECLSPEC_NORETURN Throw(PEAssembly *pPEAssembly, HRESULT hr, Exception *pInnerException = NULL);
     static void DECLSPEC_NORETURN Throw(LPCWSTR path, HRESULT hr, Exception *pInnerException = NULL);
     static void DECLSPEC_NORETURN Throw(PEAssembly *parent, const void *memory, COUNT_T size, HRESULT hr, Exception *pInnerException = NULL);
@@ -692,7 +695,7 @@ class EEFileLoadException : public EEException
     virtual Exception *CloneHelper()
     {
         WRAPPER_NO_CONTRACT;
-        return new EEFileLoadException(m_name, m_hr);
+        return new EEFileLoadException(m_name, m_hr, m_diagnosticInfo);
     }
 
  private:

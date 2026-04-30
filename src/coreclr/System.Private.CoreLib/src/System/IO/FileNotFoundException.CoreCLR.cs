@@ -12,5 +12,11 @@ namespace System.IO
             FileName = fileName;
             SetMessageField();
         }
+
+        internal FileNotFoundException(string? fileName, int hResult, string? diagnosticInfo)
+            : this(fileName, hResult)
+        {
+            FusionLog = diagnosticInfo;
+        }
     }
 }

@@ -1452,6 +1452,20 @@ EEFileLoadException::EEFileLoadException(const SString &name, HRESULT hr, Except
 }
 
 
+EEFileLoadException::EEFileLoadException(const SString &name, HRESULT hr, const SString &diagnosticInfo, Exception *pInnerException/* = NULL*/)
+  : EEFileLoadException(name, hr, pInnerException)
+{
+    CONTRACTL
+    {
+        GC_NOTRIGGER;
+        THROWS;
+        MODE_ANY;
+    }
+    CONTRACTL_END;
+
+    m_diagnosticInfo.Set(diagnosticInfo);
+}
+
 EEFileLoadException::~EEFileLoadException()
 {
     STATIC_CONTRACT_NOTHROW;
@@ -1587,10 +1601,11 @@ OBJECTREF EEFileLoadException::CreateThrowable()
     GCPROTECT_BEGIN(gc);
 
     LPCWSTR pFileName = m_name.GetUnicode();
+    LPCWSTR pDiagnosticInfo = m_diagnosticInfo.IsEmpty() ? NULL : m_diagnosticInfo.GetUnicode();
     UnmanagedCallersOnlyCaller createFileLoadEx(METHOD__FILE_LOAD_EXCEPTION__CREATE);
 
     FileLoadExceptionKind kind = GetFileLoadExceptionKind(m_hr);
-    createFileLoadEx.InvokeThrowing(kind, pFileName, (int)m_hr, &gc.pNewException);
+    createFileLoadEx.InvokeThrowing(kind, pFileName, (int)m_hr, pDiagnosticInfo, &gc.pNewException);
     _ASSERTE(gc.pNewException->GetMethodTable() == CoreLibBinder::GetException(m_kind));
 
     GCPROTECT_END();
@@ -1645,6 +1660,27 @@ void DECLSPEC_NORETURN EEFileLoadException::Throw(AssemblySpec  *pSpec, HRESULT 
     StackSString name;
     pSpec->GetDisplayName(0, name);
     EX_THROW_WITH_INNER(EEFileLoadException, (name, hr), pInnerException);
+}
+
+/* static */
+void DECLSPEC_NORETURN EEFileLoadException::Throw(AssemblySpec *pSpec, HRESULT hr, const SString &diagnosticInfo, Exception *pInnerException/* = NULL*/)
+{
+    CONTRACTL
+    {
+        GC_TRIGGERS;
+        THROWS;
+        MODE_ANY;
+    }
+    CONTRACTL_END;
+
+    if (hr == COR_E_THREADABORTED)
+        COMPlusThrow(kThreadAbortException);
+    if (hr == E_OUTOFMEMORY)
+        COMPlusThrowOM();
+
+    StackSString name;
+    pSpec->GetDisplayName(0, name);
+    EX_THROW_WITH_INNER(EEFileLoadException, (name, hr, diagnosticInfo), pInnerException);
 }
 
 /* static */
