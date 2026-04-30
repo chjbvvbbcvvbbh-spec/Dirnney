@@ -4,6 +4,8 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
+using System.Threading;
 using Microsoft.Extensions.Primitives;
 
 namespace Microsoft.Extensions.Options
@@ -18,9 +20,12 @@ namespace Microsoft.Extensions.Options
         where TOptions : class
     {
         private readonly IOptionsMonitorCache<TOptions> _cache;
+        private readonly OptionsCache<TOptions>? _fastCache;
         private readonly IOptionsFactory<TOptions> _factory;
         private readonly List<IDisposable> _registrations = new List<IDisposable>();
         internal event Action<TOptions, string>? _onChange;
+        private TOptions? _currentValue;
+        private int _currentValueGeneration;
 
         /// <summary>
         /// Initializes a new instance of <see cref="OptionsMonitor{TOptions}"/> with the specified factory, sources, and cache.
@@ -32,6 +37,7 @@ namespace Microsoft.Extensions.Options
         {
             _factory = factory;
             _cache = cache;
+            _fastCache = cache as OptionsCache<TOptions>;
 
             void RegisterSource(IOptionsChangeTokenSource<TOptions> source)
             {
@@ -76,7 +82,42 @@ namespace Microsoft.Extensions.Options
         /// <exception cref="MissingMethodException">The <typeparamref name="TOptions"/> does not have a public parameterless constructor or <typeparamref name="TOptions"/> is <see langword="abstract"/>.</exception>
         public TOptions CurrentValue
         {
-            get => Get(Options.DefaultName);
+            get
+            {
+                OptionsCache<TOptions>? fastCache = _fastCache;
+                if (fastCache is null)
+                {
+                    // User-supplied IOptionsMonitorCache: no generation tracking, always go through Get.
+                    return Get(Options.DefaultName);
+                }
+
+                int gen = fastCache.Generation;
+                // Read generation before value. RefreshCurrentValue writes _currentValue before
+                // _currentValueGeneration (release), so an acquire-load of _currentValueGeneration
+                // here guarantees the subsequent read of _currentValue sees the matching published
+                // value and not a stale one.
+                int cachedGen = Volatile.Read(ref _currentValueGeneration);
+                TOptions? value = Volatile.Read(ref _currentValue);
+                if (value is not null && cachedGen == gen)
+                {
+                    return value;
+                }
+
+                return RefreshCurrentValue(gen);
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private TOptions RefreshCurrentValue(int gen)
+        {
+            TOptions value = Get(Options.DefaultName);
+            // Write value before generation: the generation acts as a release signal that
+            // _currentValue is ready. A reader that acquire-loads _currentValueGeneration and
+            // sees gen is then guaranteed (via the release/acquire pairing) to observe the
+            // _currentValue written here.
+            Volatile.Write(ref _currentValue, value);
+            Volatile.Write(ref _currentValueGeneration, gen);
+            return value;
         }
 
         /// <summary>
@@ -88,7 +129,7 @@ namespace Microsoft.Extensions.Options
         /// <exception cref="MissingMethodException">The <typeparamref name="TOptions"/> does not have a public parameterless constructor or <typeparamref name="TOptions"/> is <see langword="abstract"/>.</exception>
         public virtual TOptions Get(string? name)
         {
-            if (_cache is not OptionsCache<TOptions> optionsCache)
+            if (_fastCache is null)
             {
                 // copying captured variables to locals avoids allocating a closure if we don't enter the if
                 string localName = name ?? Options.DefaultName;
@@ -97,8 +138,7 @@ namespace Microsoft.Extensions.Options
             }
 
             // non-allocating fast path
-            return optionsCache.GetOrAdd(name, static (name, factory) => factory.Create(name), _factory);
-
+            return _fastCache.GetOrAdd(name, static (name, factory) => factory.Create(name), _factory);
         }
 
         /// <summary>
