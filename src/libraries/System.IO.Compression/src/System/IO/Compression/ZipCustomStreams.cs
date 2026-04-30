@@ -735,6 +735,13 @@ namespace System.IO.Compression
             _runningCrc = 0;
         }
 
+        internal (uint Crc32, long BytesRead)? GetFinalCrcResult()
+        {
+            if (_crcAbandoned)
+                return null;
+            return (_runningCrc, _totalBytesRead);
+        }
+
         public override bool CanRead => !_isDisposed && _baseStream.CanRead;
         public override bool CanSeek => !_isDisposed && _baseStream.CanSeek;
         public override bool CanWrite => false;
@@ -945,6 +952,240 @@ namespace System.IO.Compression
             {
                 throw new NotSupportedException(SR.SeekingNotSupported);
             }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && !_isDisposed)
+            {
+                _baseStream.Dispose();
+                _isDisposed = true;
+            }
+            base.Dispose(disposing);
+        }
+
+        public override async ValueTask DisposeAsync()
+        {
+            if (!_isDisposed)
+            {
+                await _baseStream.DisposeAsync().ConfigureAwait(false);
+                _isDisposed = true;
+            }
+            await base.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    internal sealed class ReadAheadStream : Stream
+    {
+        private readonly Stream _baseStream;
+        private readonly byte[] _history;
+        private int _historyCount;
+        private byte[]? _pushback;
+        private int _pushbackOffset;
+        private int _pushbackCount;
+        private long _position;
+        private bool _isDisposed;
+
+        public ReadAheadStream(Stream baseStream, int historyCapacity = 8192)
+        {
+            _baseStream = baseStream;
+            _history = new byte[historyCapacity];
+        }
+
+        public override bool CanRead => !_isDisposed && _baseStream.CanRead;
+        // Must report true: DeflateStream checks CanSeek to rewind unconsumed bytes
+        // after decompression finishes, which is critical for data descriptor entries.
+        public override bool CanSeek => !_isDisposed;
+        public override bool CanWrite => false;
+
+        public override long Length
+        {
+            get
+            {
+                ThrowIfDisposed();
+                throw new NotSupportedException();
+            }
+        }
+
+        public override long Position
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return _position;
+            }
+            set
+            {
+                ThrowIfDisposed();
+                throw new NotSupportedException();
+            }
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            ValidateBufferArguments(buffer, offset, count);
+            return Read(buffer.AsSpan(offset, count));
+        }
+
+        public override int Read(Span<byte> buffer)
+        {
+            ThrowIfDisposed();
+
+            int totalRead = 0;
+
+            if (_pushbackCount > 0)
+            {
+                int fromPushback = Math.Min(buffer.Length, _pushbackCount);
+                _pushback.AsSpan(_pushbackOffset, fromPushback).CopyTo(buffer);
+                RecordHistory(buffer.Slice(0, fromPushback));
+                _pushbackOffset += fromPushback;
+                _pushbackCount -= fromPushback;
+                totalRead += fromPushback;
+                buffer = buffer.Slice(fromPushback);
+
+                if (_pushbackCount == 0)
+                {
+                    _pushback = null;
+                }
+            }
+
+            if (buffer.Length > 0)
+            {
+                int fromBase = _baseStream.Read(buffer);
+                if (fromBase > 0)
+                {
+                    RecordHistory(buffer.Slice(0, fromBase));
+                    totalRead += fromBase;
+                }
+            }
+
+            _position += totalRead;
+            return totalRead;
+        }
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            ValidateBufferArguments(buffer, offset, count);
+            return ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+        }
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            ThrowIfDisposed();
+
+            int totalRead = 0;
+
+            if (_pushbackCount > 0)
+            {
+                int fromPushback = Math.Min(buffer.Length, _pushbackCount);
+                _pushback.AsSpan(_pushbackOffset, fromPushback).CopyTo(buffer.Span);
+                RecordHistory(buffer.Span.Slice(0, fromPushback));
+                _pushbackOffset += fromPushback;
+                _pushbackCount -= fromPushback;
+                totalRead += fromPushback;
+                buffer = buffer.Slice(fromPushback);
+
+                if (_pushbackCount == 0)
+                {
+                    _pushback = null;
+                }
+            }
+
+            if (buffer.Length > 0)
+            {
+                int fromBase = await _baseStream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+                if (fromBase > 0)
+                {
+                    RecordHistory(buffer.Span.Slice(0, fromBase));
+                    totalRead += fromBase;
+                }
+            }
+
+            _position += totalRead;
+            return totalRead;
+        }
+
+        public override long Seek(long offset, SeekOrigin origin)
+        {
+            ThrowIfDisposed();
+
+            if (origin is SeekOrigin.Current && offset < 0)
+            {
+                int rewindBytes = checked((int)(-offset));
+
+                if (rewindBytes > _historyCount)
+                {
+                    throw new IOException(SR.IO_SeekBeforeBegin);
+                }
+
+                int existingPushback = _pushbackCount;
+                byte[] newPushback = new byte[rewindBytes + existingPushback];
+                Array.Copy(_history, _historyCount - rewindBytes, newPushback, 0, rewindBytes);
+
+                if (existingPushback > 0)
+                {
+                    Array.Copy(_pushback!, _pushbackOffset, newPushback, rewindBytes, existingPushback);
+                }
+
+                _pushback = newPushback;
+                _pushbackOffset = 0;
+                _pushbackCount = newPushback.Length;
+                _historyCount -= rewindBytes;
+                _position -= rewindBytes;
+
+                return _position;
+            }
+
+            throw new NotSupportedException();
+        }
+
+        private void RecordHistory(ReadOnlySpan<byte> data)
+        {
+            if (data.Length >= _history.Length)
+            {
+                data.Slice(data.Length - _history.Length).CopyTo(_history);
+                _historyCount = _history.Length;
+            }
+            else if (_historyCount + data.Length <= _history.Length)
+            {
+                data.CopyTo(_history.AsSpan(_historyCount));
+                _historyCount += data.Length;
+            }
+            else
+            {
+                int toKeep = _history.Length - data.Length;
+                Array.Copy(_history, _historyCount - toKeep, _history, 0, toKeep);
+                data.CopyTo(_history.AsSpan(toKeep));
+                _historyCount = _history.Length;
+            }
+        }
+
+        public override void Flush()
+        {
+            ThrowIfDisposed();
+        }
+
+        public override Task FlushAsync(CancellationToken cancellationToken)
+        {
+            ThrowIfDisposed();
+            return Task.CompletedTask;
+        }
+
+        public override void SetLength(long value)
+        {
+            ThrowIfDisposed();
+            throw new NotSupportedException();
+        }
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            ThrowIfDisposed();
+            throw new NotSupportedException();
+        }
+
+        private void ThrowIfDisposed()
+        {
+            ObjectDisposedException.ThrowIf(_isDisposed, this);
         }
 
         protected override void Dispose(bool disposing)
