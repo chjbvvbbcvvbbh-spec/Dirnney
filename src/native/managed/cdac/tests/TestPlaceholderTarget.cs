@@ -501,10 +501,22 @@ internal class TestPlaceholderTarget : Target
 
     public override Target.TypeInfo GetTypeInfo(DataType dataType)
     {
-        if (_typeInfoCache.TryGetValue(dataType, out var info))
-            return info;
+        bool haveAny = _typeInfoCache.TryGetValue(dataType, out Target.TypeInfo merged);
 
-        throw new NotImplementedException();
+        // Mirror the production merge pipeline using only the contracts registered on this test
+        // target. Tests may provide a mocked IMetadataLayoutSource implementation to supply a
+        // metadata-sourced partial.
+        if (_contractRegistry.TryGetContract(out IMetadataLayoutSource metadataSource)
+            && ((ITypeInfoSource)metadataSource).TryGetTypeInfo(dataType, out Target.TypeInfo fromMetadata))
+        {
+            merged = haveAny ? ContractDescriptorTarget.MergeTypeInfo(merged, fromMetadata) : fromMetadata;
+            haveAny = true;
+        }
+
+        if (!haveAny)
+            throw new NotImplementedException();
+
+        return merged;
     }
 
     public override bool TryGetThreadContext(ulong threadId, uint contextFlags, Span<byte> bufferToFill) => throw new NotImplementedException();

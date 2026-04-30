@@ -42,21 +42,18 @@ Global variables used:
 | `SyncBlockMaskLockRecursionLevel` | uint32 | Mask for extracting recursion level from `SyncBlock.ThinLock` |
 | `SyncBlockRecursionLevelShift` | uint32 | Shift value for `SyncBlock.ThinLock` recursion level |
 
-### Contract Constants:
-| Name | Type | Purpose | Value |
-| --- | --- | --- | --- |
-| `LockStateName` | string | Field name in `System.Threading.Lock` storing monitor-held state bits. | `_state` |
-| `LockOwningThreadIdName` | string | Field name in `System.Threading.Lock` storing owning thread id. | `_owningThreadId` |
-| `LockRecursionCountName` | string | Field name in `System.Threading.Lock` storing monitor recursion count. | `_recursionCount` |
-| `LockName` | string | Type name used to resolve `System.Threading.Lock`. | `Lock` |
-| `LockNamespace` | string | Namespace used to resolve `System.Threading.Lock`. | `System.Threading` |
-
 Contracts used:
 | Contract Name |
 | --- |
-| `Loader` |
-| `RuntimeTypeSystem` |
-| `EcmaMetadata` |
+| `MetadataLayoutSource` |
+
+Managed types used:
+
+| Managed Type | Field | Meaning |
+| --- | --- | --- |
+| `System.Threading.Lock` | `_state` | Lock state bits; low bit set indicates monitor held |
+| `System.Threading.Lock` | `_owningThreadId` | Thread id of the owning thread when the monitor is held |
+| `System.Threading.Lock` | `_recursionCount` | Monitor recursion count |
 
 ``` csharp
 TargetPointer GetSyncBlock(uint index)
@@ -97,13 +94,12 @@ bool TryGetLockInfo(TargetPointer syncBlock, out uint owningThreadId, out uint r
 
     if (lockObject != TargetPointer.Null)
     {
-        // Resolve System.Threading.Lock in System.Private.CoreLib by name using RuntimeTypeSystem contract, LockName and LockNamespace.
-        uint state = ReadUintField(/* Lock type */, "LockStateName", /* RuntimeTypeSystem contract */, /* MetadataReader for SPC */, lockObject);
-        bool monitorHeld = (state & 1) != 0;
+        Data.Lock lockObj = target.ProcessedData.GetOrAdd<Data.Lock>(lockObject);
+        bool monitorHeld = (lockObj.State & 1) != 0;
         if (monitorHeld)
         {
-            owningThreadId = ReadUintField(/* Lock type */, "LockOwningThreadIdName", /* contracts */, lockObject);
-            recursion = ReadUintField(/* Lock type */, "LockRecursionCountName", /* contracts */, lockObject);
+            owningThreadId = lockObj.OwningThreadId;
+            recursion = lockObj.RecursionCount;
         }
 
         return monitorHeld;

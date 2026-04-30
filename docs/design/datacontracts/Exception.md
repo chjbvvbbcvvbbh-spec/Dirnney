@@ -25,7 +25,28 @@ ExceptionData GetExceptionData(TargetPointer exceptionAddr);
 
 Data descriptors used:
 - `ExceptionInfo`
-- `Exception`
+
+Contracts used:
+| Contract Name |
+| --- |
+| `MetadataLayoutSource` |
+
+Managed types used:
+
+| Managed Type | Field | Meaning |
+| --- | --- | --- |
+| `System.Exception` | `_message` | Exception message string |
+| `System.Exception` | `_innerException` | Inner exception object |
+| `System.Exception` | `_stackTrace` | Stack trace object captured at throw |
+| `System.Exception` | `_watsonBuckets` | Watson bucket parameters |
+| `System.Exception` | `_stackTraceString` | Stack trace string |
+| `System.Exception` | `_remoteStackTraceString` | Remote stack trace string |
+| `System.Exception` | `_HResult` | HRESULT associated with the exception |
+| `System.Exception` | `_xcode` | OS exception code |
+
+The fields of the managed `System.Exception` type are read from metadata via the
+[`MetadataLayoutSource`](MetadataLayoutSource.md) contract rather than from native data
+descriptors.
 
 ``` csharp
 TargetPointer GetNestedExceptionInfo(TargetPointer exceptionInfoAddr, out TargetPointer nextNestedExceptionInfo, out TargetPointer thrownObjectHandle)

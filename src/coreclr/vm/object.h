@@ -866,15 +866,6 @@ class StringObject : public Object
 private:
     static STRINGREF* EmptyStringRefPtr;
     static bool EmptyStringIsFrozen;
-
-    friend struct ::cdac_data<StringObject>;
-};
-
-template<>
-struct cdac_data<StringObject>
-{
-    static constexpr size_t m_FirstChar = offsetof(StringObject, m_FirstChar);
-    static constexpr size_t m_StringLength = offsetof(StringObject, m_StringLength);
 };
 
 /*================================GetEmptyString================================
@@ -2429,19 +2420,6 @@ private:
     INT32       _HResult;
 
     friend struct ::cdac_data<ExceptionObject>;
-};
-
-template<>
-struct cdac_data<ExceptionObject>
-{
-    static constexpr size_t _message = offsetof(ExceptionObject, _message);
-    static constexpr size_t _innerException = offsetof(ExceptionObject, _innerException);
-    static constexpr size_t _stackTrace = offsetof(ExceptionObject, _stackTrace);
-    static constexpr size_t _watsonBuckets = offsetof(ExceptionObject, _watsonBuckets);
-    static constexpr size_t _stackTraceString = offsetof(ExceptionObject, _stackTraceString);
-    static constexpr size_t _remoteStackTraceString = offsetof(ExceptionObject, _remoteStackTraceString);
-    static constexpr size_t _HResult = offsetof(ExceptionObject, _HResult);
-    static constexpr size_t _xcode = offsetof(ExceptionObject, _xcode);
 };
 
 #include "poppack.h"

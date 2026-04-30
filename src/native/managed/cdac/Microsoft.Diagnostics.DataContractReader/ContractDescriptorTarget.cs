@@ -40,6 +40,7 @@ public sealed unsafe class ContractDescriptorTarget : Target
     private readonly IReadOnlyDictionary<string, GlobalValue> _globals = new Dictionary<string, GlobalValue>();
     private readonly Dictionary<DataType, Target.TypeInfo> _knownTypes = [];
     private readonly Dictionary<string, Target.TypeInfo> _types = [];
+    private readonly Dictionary<DataType, Target.TypeInfo> _mergedTypeCache = [];
 
     public override ContractRegistry Contracts { get; }
     public override DataCache ProcessedData { get; }
@@ -823,10 +824,32 @@ public sealed unsafe class ContractDescriptorTarget : Target
 
     public override TypeInfo GetTypeInfo(DataType type)
     {
-        if (!_knownTypes.TryGetValue(type, out Target.TypeInfo typeInfo))
+        if (_mergedTypeCache.TryGetValue(type, out Target.TypeInfo cached))
+            return cached;
+
+        bool haveAny = _knownTypes.TryGetValue(type, out Target.TypeInfo merged);
+
+        // Supplement with any registered ITypeInfoSource contracts. Today only
+        // IMetadataLayoutSource fills this role; when additional source contracts appear
+        // they should be invoked here in registration (priority) order.
+        if (Contracts.TryGetContract(out IMetadataLayoutSource metadataSource)
+            && ((ITypeInfoSource)metadataSource).TryGetTypeInfo(type, out Target.TypeInfo fromMetadata))
+        {
+            merged = haveAny ? MergeTypeInfo(merged, fromMetadata) : fromMetadata;
+            haveAny = true;
+        }
+
+        if (!haveAny)
             throw new InvalidOperationException($"Failed to get type info for '{type}'");
 
-        return typeInfo;
+        _mergedTypeCache[type] = merged;
+        return merged;
+    }
+
+    public override void Flush()
+    {
+        _mergedTypeCache.Clear();
+        base.Flush();
     }
 
     public Target.TypeInfo GetTypeInfo(string type)
@@ -839,6 +862,43 @@ public sealed unsafe class ContractDescriptorTarget : Target
             return GetTypeInfo(dataType);
 
         throw new InvalidOperationException($"Failed to get type info for '{type}'");
+    }
+
+    /// <summary>
+    /// Merge a lower-priority <paramref name="partial"/> into an already-established
+    /// <paramref name="primary"/>. Rules:
+    /// <list type="bullet">
+    /// <item>Fields that appear in both: the primary record wins atomically; if both sources
+    /// declare the same field with *different* offsets, throw — callers must reconcile.</item>
+    /// <item>Fields that appear only in <paramref name="partial"/>: added to the merged result.</item>
+    /// <item><c>Size</c>: primary wins if it is set; otherwise partial fills in.</item>
+    /// <item><c>TypeHandle</c>/<c>StaticFields</c>: primary wins if set; otherwise partial fills in.</item>
+    /// </list>
+    /// </summary>
+    public static Target.TypeInfo MergeTypeInfo(Target.TypeInfo primary, Target.TypeInfo partial)
+    {
+        Dictionary<string, Target.FieldInfo> mergedFields = new(primary.Fields);
+        foreach (KeyValuePair<string, Target.FieldInfo> kvp in partial.Fields)
+        {
+            if (mergedFields.TryGetValue(kvp.Key, out Target.FieldInfo existing))
+            {
+                if (existing.Offset != kvp.Value.Offset)
+                {
+                    throw new InvalidOperationException(
+                        $"Conflicting offsets for field '{kvp.Key}': {existing.Offset} vs {kvp.Value.Offset}.");
+                }
+                continue;
+            }
+            mergedFields[kvp.Key] = kvp.Value;
+        }
+
+        return new Target.TypeInfo
+        {
+            Size = primary.Size ?? partial.Size,
+            Fields = mergedFields,
+            TypeHandle = primary.TypeHandle ?? partial.TypeHandle,
+            StaticFields = primary.StaticFields ?? partial.StaticFields,
+        };
     }
 
     internal bool TryGetContractVersion(string contractName, [NotNullWhen(true)] out string? version)

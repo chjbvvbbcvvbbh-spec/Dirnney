@@ -113,6 +113,10 @@ public abstract class ContractRegistry
     /// </summary>
     public virtual IConditionalWeakTable ConditionalWeakTable => GetContract<IConditionalWeakTable>();
     /// <summary>
+    /// Gets an instance of the MetadataLayoutSource contract for the target.
+    /// </summary>
+    public virtual IMetadataLayoutSource MetadataLayoutSource => GetContract<IMetadataLayoutSource>();
+    /// <summary>
     /// Gets an instance of the AuxiliarySymbols contract for the target.
     /// </summary>
     public virtual IAuxiliarySymbols AuxiliarySymbols => GetContract<IAuxiliarySymbols>();

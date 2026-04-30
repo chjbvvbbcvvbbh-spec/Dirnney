@@ -119,19 +119,6 @@ CDAC_TYPE_END(GCAllocContext)
 
 // Exception
 
-// Use exact managed type field names for the descriptor as field names often can't change due to binary serialization or implicit diagnostic contracts
-CDAC_TYPE_BEGIN(Exception)
-CDAC_TYPE_INDETERMINATE(Exception)
-CDAC_TYPE_FIELD(Exception, T_POINTER, _message, cdac_data<ExceptionObject>::_message)
-CDAC_TYPE_FIELD(Exception, T_POINTER, _innerException, cdac_data<ExceptionObject>::_innerException)
-CDAC_TYPE_FIELD(Exception, T_POINTER, _stackTrace, cdac_data<ExceptionObject>::_stackTrace)
-CDAC_TYPE_FIELD(Exception, T_POINTER, _watsonBuckets, cdac_data<ExceptionObject>::_watsonBuckets)
-CDAC_TYPE_FIELD(Exception, T_POINTER, _stackTraceString, cdac_data<ExceptionObject>::_stackTraceString)
-CDAC_TYPE_FIELD(Exception, T_POINTER, _remoteStackTraceString, cdac_data<ExceptionObject>::_remoteStackTraceString)
-CDAC_TYPE_FIELD(Exception, T_INT32, _HResult, cdac_data<ExceptionObject>::_HResult)
-CDAC_TYPE_FIELD(Exception, T_INT32, _xcode, cdac_data<ExceptionObject>::_xcode)
-CDAC_TYPE_END(Exception)
-
 CDAC_TYPE_BEGIN(ExceptionInfo)
 CDAC_TYPE_INDETERMINATE(ExceptionInfo)
 CDAC_TYPE_FIELD(ExceptionInfo, T_POINTER, PreviousNestedInfo, offsetof(ExInfo, m_pPrevNestedInfo))
@@ -171,12 +158,6 @@ CDAC_TYPE_SIZE(OBJHEADER_SIZE)
 CDAC_TYPE_FIELD(ObjectHeader, T_UINT32, SyncBlockValue, cdac_data<ObjHeader>::SyncBlockValue)
 CDAC_TYPE_END(ObjectHeader)
 
-CDAC_TYPE_BEGIN(String)
-CDAC_TYPE_INDETERMINATE(String)
-CDAC_TYPE_FIELD(String, T_POINTER, m_FirstChar, cdac_data<StringObject>::m_FirstChar)
-CDAC_TYPE_FIELD(String, T_UINT32, m_StringLength, cdac_data<StringObject>::m_StringLength)
-CDAC_TYPE_END(String)
-
 CDAC_TYPE_BEGIN(Array)
 CDAC_TYPE_SIZE(sizeof(ArrayBase))
 CDAC_TYPE_FIELD(Array, T_UINT32, m_NumComponents, cdac_data<ArrayBase>::m_NumComponents)
@@ -202,17 +183,6 @@ CDAC_TYPE_END(SyncBlock)
 
 
 #ifdef FEATURE_COMWRAPPERS
-CDAC_TYPE_BEGIN(NativeObjectWrapperObject)
-CDAC_TYPE_INDETERMINATE(NativeObjectWrapperObject)
-CDAC_TYPE_FIELD(NativeObjectWrapperObject, T_POINTER, ExternalComObject, cdac_data<NativeObjectWrapperObject>::ExternalComObject)
-CDAC_TYPE_END(NativeObjectWrapperObject)
-
-CDAC_TYPE_BEGIN(ManagedObjectWrapperHolderObject)
-CDAC_TYPE_INDETERMINATE(ManagedObjectWrapperHolderObject)
-CDAC_TYPE_FIELD(ManagedObjectWrapperHolderObject, T_POINTER, WrappedObject, cdac_data<ManagedObjectWrapperHolderObject>::WrappedObject)
-CDAC_TYPE_FIELD(ManagedObjectWrapperHolderObject, T_POINTER, Wrapper, cdac_data<ManagedObjectWrapperHolderObject>::Wrapper)
-CDAC_TYPE_END(ManagedObjectWrapperHolderObject)
-
 CDAC_TYPE_BEGIN(ManagedObjectWrapperLayout)
 CDAC_TYPE_INDETERMINATE(ManagedObjectWrapperLayout)
 CDAC_TYPE_FIELD(ManagedObjectWrapperLayout, T_INT64, RefCount, cdac_data<InteropLib::ABI::ManagedObjectWrapperLayout>::RefCount)
@@ -1534,6 +1504,7 @@ CDAC_GLOBAL_CONTRACT(Exception, c1)
 CDAC_GLOBAL_CONTRACT(ExecutionManager, c2)
 CDAC_GLOBAL_CONTRACT(GCInfo, c1)
 CDAC_GLOBAL_CONTRACT(Loader, c1)
+CDAC_GLOBAL_CONTRACT(MetadataLayoutSource, c1)
 CDAC_GLOBAL_CONTRACT(Notifications, c1)
 CDAC_GLOBAL_CONTRACT(Object, c1)
 CDAC_GLOBAL_CONTRACT(PlatformMetadata, c1)
