@@ -1352,6 +1352,7 @@ namespace CseTest
     public class Test_Main
     {
         [ActiveIssue("needs triage", typeof(PlatformDetection), nameof(PlatformDetection.IsArm64Process))]
+        [SkipOnCoreClr("This test is sensitive to JIT optimizations.", RuntimeTestModes.AnyJitOptimizationStress)]
         [Fact]
         [OuterLoop]
         [SkipOnCoreClr("", RuntimeTestModes.AnyGCStress)]
