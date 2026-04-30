@@ -1616,6 +1616,11 @@ namespace Internal.IL
             ThrowHelper.ThrowInvalidProgramException();
         }
 
+        private static void ReportInvalidExceptionRegion()
+        {
+            ThrowHelper.ThrowInvalidProgramException();
+        }
+
         private static bool IsTypeGetTypeFromHandle(MethodDesc method)
         {
             if (method.IsIntrinsic && method.Name.SequenceEqual("GetTypeFromHandle"u8))
