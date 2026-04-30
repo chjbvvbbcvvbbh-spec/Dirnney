@@ -147,7 +147,31 @@ namespace System.Xml.Serialization
                 }
             }
 
+            // When text has a separator, handle the array as a separated list
+            if (text?.Separator.HasValue == true && elements.Length == 0)
+            {
+                WriteTextList(o, text);
+                return;
+            }
+
             WriteArrayItems(elements, text, choice, o, choiceSource);
+        }
+
+        private void WriteTextList(object o, TextAccessor text)
+        {
+            var a = o as IEnumerable;
+            Debug.Assert(a != null);
+            bool first = true;
+            string separatorStr = text.Separator!.Value.ToString();
+            foreach (object item in a)
+            {
+                if (!first)
+                {
+                    WriteValue(separatorStr);
+                }
+                WriteText(item, text);
+                first = false;
+            }
         }
 
         private void WriteArrayItems(ElementAccessor[] elements, TextAccessor? text, ChoiceIdentifierAccessor? choice, object o, object? choiceSources)
@@ -850,7 +874,8 @@ namespace System.Xml.Serialization
                 {
                     var a = (IEnumerable)memberValue;
                     IEnumerator e = a.GetEnumerator();
-                    bool shouldAppendWhitespace = false;
+                    bool shouldAppendSeparator = false;
+                    char separatorChar = attribute.Separator ?? ' ';
                     if (e != null)
                     {
                         while (e.MoveNext())
@@ -875,9 +900,9 @@ namespace System.Xml.Serialization
                                 // check to see if we can write values of the attribute sequentially
                                 if (canOptimizeWriteListSequence)
                                 {
-                                    if (shouldAppendWhitespace)
+                                    if (shouldAppendSeparator)
                                     {
-                                        Writer.WriteString(" ");
+                                        Writer.WriteString(separatorChar.ToString());
                                     }
 
                                     if (ai is byte[])
@@ -891,9 +916,9 @@ namespace System.Xml.Serialization
                                 }
                                 else
                                 {
-                                    if (shouldAppendWhitespace)
+                                    if (shouldAppendSeparator)
                                     {
-                                        sb.Append(' ');
+                                        sb.Append(separatorChar);
                                     }
 
                                     sb.Append(stringValue);
@@ -904,7 +929,7 @@ namespace System.Xml.Serialization
                                 WriteAttribute(ai, attribute, container);
                             }
 
-                            shouldAppendWhitespace = true;
+                            shouldAppendSeparator = true;
                         }
 
                         if (attribute.IsList)
