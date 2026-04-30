@@ -7856,6 +7856,8 @@ DONE_MORPHING_CHILDREN:
                 goto CM_OVF_OP;
             }
 
+            // TODO: Call fgOptimizeDistributiveArithmetic + fgOptimizeCommutativeArithmetic
+
             if (!fgGlobalMorph)
             {
                 break;
@@ -10306,7 +10308,7 @@ GenTree* Compiler::fgOptimizeHWIntrinsicAssociative(GenTreeHWIntrinsic* tree)
 #endif // FEATURE_HW_INTRINSICS
 
 //------------------------------------------------------------------------
-// fgOptimizeCommutativeArithmetic: Optimizes commutative operations.
+// fgOptimizeCommutativeArithmetic: Optimizes commutative Arithmetic.
 //
 // Arguments:
 //   tree - the unchecked GT_ADD/GT_MUL/GT_OR/GT_XOR/GT_AND tree to optimize.

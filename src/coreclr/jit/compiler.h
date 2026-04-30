@@ -3904,6 +3904,7 @@ public:
 
     GenTree* gtFoldExpr(GenTree* tree);
     GenTree* gtFoldExprConst(GenTree* tree);
+    GenTree* gtFoldDistributiveArithmetic(GenTree* tree);
     GenTree* gtFoldIndirConst(GenTreeIndir* indir);
     GenTree* gtFoldExprSpecial(GenTree* tree);
     GenTree* gtFoldExprSpecialFloating(GenTree* tree);
