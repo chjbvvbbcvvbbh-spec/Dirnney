@@ -51,6 +51,10 @@
 #undef EP_ALIGN_UP
 #define EP_ALIGN_UP(val,align) ALIGN_UP(val,align)
 
+extern void ep_rt_coreclr_sample_profiler_enabled (EventPipeEvent *sampling_event);
+extern void ep_rt_coreclr_sample_profiler_session_enabled (void);
+extern void ep_rt_coreclr_sample_profiler_disabled (void);
+
 static
 inline
 ep_rt_lock_handle_t *
@@ -604,7 +608,7 @@ void
 ep_rt_sample_profiler_enabled (EventPipeEvent *sampling_event)
 {
     STATIC_CONTRACT_NOTHROW;
-    // no-op
+    ep_rt_coreclr_sample_profiler_enabled (sampling_event);
 }
 
 static
@@ -613,7 +617,7 @@ void
 ep_rt_sample_profiler_session_enabled (void)
 {
     STATIC_CONTRACT_NOTHROW;
-    // no-op
+    ep_rt_coreclr_sample_profiler_session_enabled ();
 }
 
 static
@@ -622,7 +626,7 @@ void
 ep_rt_sample_profiler_disabled (void)
 {
     STATIC_CONTRACT_NOTHROW;
-    // no-op
+    ep_rt_coreclr_sample_profiler_disabled ();
 }
 
 static
@@ -666,6 +670,8 @@ ep_rt_byte_array_free (uint8_t *ptr)
 /*
  * Event.
  */
+
+#ifndef PERFTRACING_DISABLE_THREADS
 
 static
 void
@@ -765,6 +771,71 @@ ep_rt_wait_event_is_valid (ep_rt_wait_event_handle_t *wait_event)
 	return wait_event->event->IsValid ();
 }
 
+#else // PERFTRACING_DISABLE_THREADS
+
+static
+inline
+void
+ep_rt_wait_event_alloc (
+	ep_rt_wait_event_handle_t *wait_event,
+	bool manual,
+	bool initial)
+{
+	EP_ASSERT (wait_event != NULL);
+	wait_event->event = (CLREventStatic * )INVALID_HANDLE_VALUE;
+}
+
+static
+inline
+void
+ep_rt_wait_event_free (ep_rt_wait_event_handle_t *wait_event)
+{
+	wait_event->event = NULL;
+}
+
+static
+inline
+bool
+ep_rt_wait_event_set (ep_rt_wait_event_handle_t *wait_event)
+{
+	return true;
+}
+
+static
+inline
+int32_t
+ep_rt_wait_event_wait (
+	ep_rt_wait_event_handle_t *wait_event,
+	uint32_t timeout,
+	bool alertable)
+{
+	EP_ASSERT (wait_event != NULL && wait_event->event == (CLREventStatic *)INVALID_HANDLE_VALUE);
+	return (int32_t)0;
+}
+
+static
+inline
+EventPipeWaitHandle
+ep_rt_wait_event_get_wait_handle (ep_rt_wait_event_handle_t *wait_event)
+{
+	EP_ASSERT (wait_event != NULL);
+	return (EventPipeWaitHandle)wait_event->event;
+}
+
+static
+inline
+bool
+ep_rt_wait_event_is_valid (ep_rt_wait_event_handle_t *wait_event)
+{
+	if (wait_event == NULL || wait_event->event == NULL || wait_event->event != (CLREventStatic *)INVALID_HANDLE_VALUE)
+		return false;
+	else
+		return true;
+}
+
+#endif // PERFTRACING_DISABLE_THREADS
+
+
 /*
  * Misc.
  */
@@ -851,6 +922,7 @@ typedef struct _rt_coreclr_thread_params_internal_t {
 #undef EP_RT_DEFINE_THREAD_FUNC
 #define EP_RT_DEFINE_THREAD_FUNC(name) static ep_rt_thread_start_func_return_t WINAPI name (LPVOID data)
 
+#ifndef PERFTRACING_DISABLE_THREADS
 EP_RT_DEFINE_THREAD_FUNC (ep_rt_thread_coreclr_start_func)
 {
 	STATIC_CONTRACT_NOTHROW;
@@ -934,8 +1006,57 @@ ep_rt_queue_job (
 	void *job_func,
 	void *params)
 {
-    EP_UNREACHABLE ("Not implemented in CoreCLR");
+	EP_UNREACHABLE ("Not implemented on in multi threaded");
+	return false;
 }
+
+#else // PERFTRACING_DISABLE_THREADS
+
+static
+inline
+bool
+ep_rt_thread_create (
+	void *thread_func,
+	void *params,
+	EventPipeThreadType thread_type,
+	void *id)
+{
+	EP_UNREACHABLE ("Not implemented on in single threaded");
+	return false;
+}
+
+#ifdef HOST_BROWSER
+typedef size_t (*ep_rt_job_cb_t)(void *data);
+extern "C" void SystemJS_DiagnosticServerQueueJob (ep_rt_job_cb_t cb, void *data);
+#endif
+
+static
+bool
+ep_rt_queue_job (
+	void *job_func,
+	void *params)
+{
+#ifdef HOST_BROWSER
+	// in single-threaded, it will run the callback inline and re-schedule itself if necessary
+	// it's called from browser event loop
+	ep_rt_job_cb_t cb = (ep_rt_job_cb_t)job_func;
+
+	// invoke the callback inline for the first time
+	size_t done = cb (params);
+
+	// see if it's done or needs to be scheduled again
+	if (!done) {
+		// self schedule again
+		SystemJS_DiagnosticServerQueueJob (cb, params);
+	}
+
+	return true;
+#else
+    EP_UNREACHABLE ("Not implemented on this platform");
+#endif
+}
+
+#endif // PERFTRACING_DISABLE_THREADS
 
 static
 inline
@@ -950,6 +1071,7 @@ inline
 void
 ep_rt_thread_sleep (uint64_t ns)
 {
+#ifndef PERFTRACING_DISABLE_THREADS
 	STATIC_CONTRACT_NOTHROW;
 
 #ifdef TARGET_UNIX
@@ -958,6 +1080,7 @@ ep_rt_thread_sleep (uint64_t ns)
 	const uint32_t NUM_NANOSECONDS_IN_1_MS = 1000000;
 	ClrSleepEx (static_cast<DWORD>(ns / NUM_NANOSECONDS_IN_1_MS), FALSE);
 #endif //TARGET_UNIX
+#endif // PERFTRACING_DISABLE_THREADS
 }
 
 static

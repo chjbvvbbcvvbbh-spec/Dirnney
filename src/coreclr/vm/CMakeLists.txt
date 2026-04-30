@@ -937,6 +937,11 @@ elseif(CLR_CMAKE_TARGET_ARCH_WASM)
         exceptionhandling.cpp
         gcinfodecoder.cpp
     )
+    if (CLR_CMAKE_TARGET_BROWSER)
+        list(APPEND VM_SOURCES_WKS_ARCH
+            ${ARCH_SOURCES_DIR}/browserprofiler.cpp
+        )
+    endif(CLR_CMAKE_TARGET_BROWSER)
     if (GEN_PINVOKE)
         list(APPEND VM_SOURCES_WKS_ARCH
             ${ARCH_SOURCES_DIR}/callhelpers-pinvoke.cpp
