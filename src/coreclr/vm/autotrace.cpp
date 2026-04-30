@@ -18,7 +18,6 @@
  *
  */
 
-#include "common.h" // Required for pre-compiled header
 
 #ifdef FEATURE_AUTO_TRACE
 #ifdef TARGET_UNIX

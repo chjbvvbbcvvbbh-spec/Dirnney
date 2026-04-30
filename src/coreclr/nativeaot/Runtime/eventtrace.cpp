@@ -11,7 +11,6 @@
 #include "gcenv.h"
 #include "gcheaputilities.h"
 
-#include "daccess.h"
 
 #include "eventtrace_etw.h"
 #include "eventtracebase.h"
