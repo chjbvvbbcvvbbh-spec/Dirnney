@@ -1002,6 +1002,8 @@ protected:
 #endif // defined(TARGET_XARCH)
 
 #ifdef TARGET_ARM64
+    void genEmbeddedMaskedHWIntrinsic(const HWIntrinsic intrinCndSel, regNumber targetReg);
+
     class HWIntrinsicImmOpHelper final
     {
     public:
