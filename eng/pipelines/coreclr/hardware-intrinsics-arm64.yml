@@ -5,10 +5,10 @@ pr:
     - main
   paths:
     include:
-    - eng/pipelines/**
-    - src/coreclr/jit/**
-    - src/tests/Common/GenerateHWIntrinsicTests/**
-    - src/tests/JIT/HardwareIntrinsics/**
+    - eng/pipelines/coreclr/hardware-intrinsics-arm64.yml
+    - src/coreclr/jit/emitarm64.cpp
+    - src/coreclr/jit/emitarm64sve.cpp
+    - src/coreclr/jit/hwintrinsicarm64.cpp
 
 variables:
   - template: /eng/pipelines/common/variables.yml
@@ -24,14 +24,5 @@ extends:
       - template: /eng/pipelines/coreclr/templates/jit-hwintrin-common.yml
         parameters:
           platforms:
-            - windows_x86
-            - windows_x64
-          testBuildArgs: 'tree JIT/HardwareIntrinsics'
-
-      - template: /eng/pipelines/coreclr/templates/jit-hwintrin-common.yml
-        parameters:
-          platforms:
-            - linux_arm
-            - linux_x64
-            - osx_arm64
+            - linux_arm64
           testBuildArgs: '-tree:JIT/HardwareIntrinsics'
