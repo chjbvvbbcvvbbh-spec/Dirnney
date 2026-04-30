@@ -10450,7 +10450,12 @@ inline bool GenTree::IsIntegralConstPow2() const
 {
     if (IsIntegralConst())
     {
-        return isPow2(AsIntConCommon()->IntegralValue());
+        if (IsCnsIntOrI())
+        {
+            return isPow2((int32_t)AsIntCon()->IconValue());
+        }
+
+        return isPow2(AsLngCon()->LngValue());
     }
 
     return false;
@@ -10473,7 +10478,12 @@ inline bool GenTree::IsIntegralConstUnsignedPow2() const
 {
     if (IsIntegralConst())
     {
-        return isPow2((UINT64)AsIntConCommon()->IntegralValue());
+        if (IsCnsIntOrI())
+        {
+            return isPow2((uint32_t)AsIntCon()->IconValue());
+        }
+
+        return isPow2((uint64_t)AsLngCon()->LngValue());
     }
 
     return false;
@@ -10491,9 +10501,12 @@ inline bool GenTree::IsIntegralConstAbsPow2() const
 {
     if (IsIntegralConst())
     {
-        INT64  svalue = AsIntConCommon()->IntegralValue();
-        size_t value  = (svalue == SSIZE_T_MIN) ? static_cast<size_t>(svalue) : static_cast<size_t>(abs(svalue));
-        return isPow2(value);
+        if (IsCnsIntOrI())
+        {
+            return isPow2Abs((int32_t)AsIntCon()->IconValue());
+        }
+
+        return isPow2Abs(AsLngCon()->LngValue());
     }
 
     return false;
