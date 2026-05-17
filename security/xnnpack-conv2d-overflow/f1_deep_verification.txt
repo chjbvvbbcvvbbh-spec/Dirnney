@@ -1,0 +1,158 @@
+Finding 1 — Deep Verification: gles2_cmd_decoder.cc:12629 uint32 Overflow
+==========================================================================
+Date:    2026-05-17
+Browser: Chromium 150.0.7844.0 / SwiftShader ANGLE
+Method:  Live browser probes + Chromium source static analysis
+Goal:    Determine all attack vectors without a compromised renderer
+
+
+SOURCE ANALYSIS
+───────────────────────────────────────────────────────────────────────────
+
+1. SW decompression trigger (gles2_cmd_decoder.cc:12988)
+
+    const CompressedFormatInfo* format_info = GetCompressedFormatInfo(internal_format);
+    if (format_info != nullptr && !format_info->support_check(*feature_info_)) {
+        auto decompressed_data = DecompressTextureData(
+            state_, *format_info, width, height, depth, image_size, data);
+
+   DecompressTextureData is called when BOTH:
+     (a) format_info != nullptr  — format is in kCompressedFormatInfoArray
+     (b) !support_check(...)     — GPU context does NOT natively support it
+
+2. kCompressedFormatInfoArray contents (gles2_cmd_decoder.cc:12495–12589)
+
+   ONLY ETC2/EAC formats have SW decompressors:
+     GL_COMPRESSED_R11_EAC, GL_COMPRESSED_SIGNED_R11_EAC
+     GL_COMPRESSED_RG11_EAC, GL_COMPRESSED_SIGNED_RG11_EAC
+     GL_COMPRESSED_RGB8_ETC2, GL_COMPRESSED_SRGB8_ETC2
+     GL_COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2
+     GL_COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2
+     GL_COMPRESSED_RGBA8_ETC2_EAC, GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC
+
+   BPTC/S3TC/RGTC/ASTC are NOT in the array → no SW decompression → no overflow path.
+
+3. CheckETCFormatSupport (gles2_cmd_decoder.cc:12467)
+
+   bool CheckETCFormatSupport(const FeatureInfo& feature_info) {
+     return version_info.IsAtLeastGLES(3, 0);
+   }
+
+   TRUE  → GLES3+ context → ETC2 native → DecompressTextureData NOT called → safe
+   FALSE → GLES2 context  → ETC2 not native → DecompressTextureData IS called → OVERFLOW
+
+4. ValidateCompressedFormatTarget (gl_utils.cc:663)
+
+   Formats blocked for GL_TEXTURE_3D: ALL ETC2/EAC, S3TC, RGTC → returns false.
+   GL_TEXTURE_2D_ARRAY: NOT in the block list → ETC2+TEXTURE_2D_ARRAY passes.
+
+   CONFIRMED LIVE: compressedTexImage3D(ETC2, TEXTURE_2D_ARRAY, 8x8x1) → NO_ERROR
+
+5. ValidateCompressedTexFuncData (gles2_cmd_decoder.cc:12664)
+
+   if (size != bytes_required) { GL_INVALID_VALUE; return false; }
+   Also checks PBO bounds.
+
+   imageSize must EXACTLY match format-derived expected size. No bypass found.
+   CONFIRMED LIVE: Both direct and PBO modes return INVALID_VALUE for wrong imageSize.
+
+
+LIVE PROBE RESULTS (Chrome 150 / SwiftShader)
+───────────────────────────────────────────────────────────────────────────
+
+Probe                                              Result
+─────────────────────────────────────────────────────────────────────────
+ETC2 TEXTURE_2D_ARRAY 8x8x1 (correct data)        NO_ERROR  ← format allowed
+ETC2 TEXTURE_2D_ARRAY 2048x2048x513 wrong imgSz   INVALID_VALUE  ← validated
+ETC2 TEXTURE_2D_ARRAY 2048x2048x513 PBO wrong sz  INVALID_VALUE  ← PBO also validates
+ETC2 TEXTURE_3D 8x8x1 (correct data)              INVALID_OPERATION ← target blocked
+BPTC TEXTURE_3D 8x8x1 (correct data)              NO_ERROR  ← format OK but no SW decomp
+BPTC TEXTURE_3D 2048x2048x513 wrong imageSize      INVALID_VALUE
+EAC R11 TEXTURE_2D_ARRAY 8x8x1                    INVALID_VALUE  ← wrong imageSize provided
+texStorage3D BPTC 2048x2048x513                    INVALID_OPERATION ← SwiftShader rejects
+
+MAX_ARRAY_TEXTURE_LAYERS = 2048 — all overflow depths (257, 513, 1025) within limit.
+
+
+OVERFLOW MATH — ETC2 RGB8 + TEXTURE_2D_ARRAY
+───────────────────────────────────────────────────────────────────────────
+
+Format:          GL_COMPRESSED_RGB8_ETC2
+output_format:   GL_RGBA8 (RGBA8 = 4 bytes/pixel) ← from kCompressedFormatInfoArray
+Overflow expr:   output_pixel_size * width * height * depth  (all uint32_t)
+
+Case 1: 2048 × 2048 × 257 layers
+  True:    4 × 2048 × 2048 × 257  = 4,311,744,512 > 2^32
+  uint32:  4,311,744,512 mod 2^32 = 16,777,216  (16 MB)
+  AllocD:  16 MB — passes HeapArray empty() check (non-zero)
+  Written: 4.1 GB into 16 MB buffer → CRITICAL heap-buffer-overflow in GPU process
+  Compressed input: ceil(2048/4)² × 257 × 8 = 512² × 257 × 8 = 536,870,912 bytes (512 MB)
+
+Case 2: 2048 × 2048 × 513 layers  (from original research)
+  True:    8,606,711,808  →  uint32 = 16,777,216 (16 MB alloc, 8.6 GB write)
+  Compressed input: 512² × 513 × 8 = 1,073,741,824 bytes (1 GB)
+
+Case 3: EAC R11 (output_pixel_size = 1, R8) + 2048 × 2048 × 1025 layers
+  True:    1 × 2048 × 2048 × 1025 = 4,299,161,600  →  uint32 = 4,194,304 (4 MB alloc)
+  Written: 4.3 GB into 4 MB buffer
+  Compressed: 512² × 1025 × 8 = 2,147,483,648 bytes (2 GB)
+
+
+ATTACK SCENARIOS
+───────────────────────────────────────────────────────────────────────────
+
+Scenario A — Direct WebGL2 (JS) — BLOCKED
+  Reason 1: SwiftShader GLES3 context → CheckETCFormatSupport = TRUE → native ETC2
+             → DecompressTextureData NEVER called → no overflow even with correct data.
+  Reason 2: Minimum correct compressed data = 512 MB — infeasible to allocate in JS.
+  Verdict: NOT exploitable from unmodified WebGL2 JS in this environment.
+
+Scenario B — Direct WebGL1 (JS) — BLOCKED
+  WebGL1 context = GLES2 → CheckETCFormatSupport = FALSE → SW decompression active.
+  BUT: WebGL1 JS has no compressedTexImage3D (GLES3 function).
+  AND: 2D textures max 16384×16384 → 4*16384*16384 = 268MB < 2^32 → no overflow.
+  Verdict: NOT exploitable from WebGL1 JS.
+
+Scenario C — Compromised renderer → GLES2 command buffer — EXPLOITABLE
+  1. Attacker achieves renderer code execution (separate vulnerability required).
+  2. Uses existing WebGL1 GLES2 command buffer channel.
+  3. Crafts raw IPC: compressedTexImage3D(TEXTURE_2D_ARRAY, ETC2_RGB8, 2048, 2048, 257,
+                                          imageSize=536MB, data_ptr).
+     - TEXTURE_2D_ARRAY: not blocked by ValidateCompressedFormatTarget
+     - imageSize=536MB: exactly matches expected → passes ValidateCompressedTexFuncData
+     - Renderer allocates 536 MB in shared memory for the IPC transfer
+  4. GPU process (GLES2 context): CheckETCFormatSupport = FALSE → SW decompression.
+  5. DecompressTextureData: 4*2048*2048*257 mod 2^32 = 16MB alloc, 4.1 GB written.
+  6. Heap-buffer-overflow in GPU process → GPU process code execution (sandbox escape).
+  Verdict: EXPLOITABLE as second-stage GPU process escape (post renderer compromise).
+
+Scenario D — Real hardware without native ETC2 — EXPLOITABLE
+  On hardware that does not support ETC2 natively (old embedded GPU, specific Android SOCs),
+  IsAtLeastGLES(3,0) may return false even with a GLES3 context if ETC2 is only exposed
+  via extension with no native support. In this case the WebGL2 path would trigger
+  SW decompression. Compressed data (512 MB–1 GB) is the remaining JS barrier.
+  Verdict: Hardware-specific, not reproducible in test environment.
+
+
+DEFINITIVE VERDICT
+───────────────────────────────────────────────────────────────────────────
+
+Finding 1 (gles2_cmd_decoder.cc:12629) is NOT directly triggerable from
+uncompromised WebGL JS on Chrome 150 + SwiftShader, due to three independent defenses:
+
+  Defense 1: CheckETCFormatSupport = IsAtLeastGLES(3,0)
+             SwiftShader reports GLES3 → native ETC2 → no SW decompression path.
+
+  Defense 2: ValidateCompressedTexFuncData requires exact imageSize match.
+             Providing 512 MB+ of correct compressed data is infeasible from JS.
+
+  Defense 3: ValidateCompressedFormatTarget blocks ETC2 for GL_TEXTURE_3D.
+             GL_TEXTURE_2D_ARRAY is NOT blocked — this is the second-stage attack target.
+
+The underlying code is vulnerable: the integer overflow exists, the check is insufficient
+(empty() only catches wrap-to-zero), and the TEXTURE_2D_ARRAY path is open.
+Exploitation requires a compromised renderer (second-hop) or specific GLES2 hardware.
+
+Severity re-classification:
+  Original: CRITICAL (GPU process, web content trigger claimed)
+  Revised:  HIGH (GPU process, second-stage — requires compromised renderer or GLES2 hw)
