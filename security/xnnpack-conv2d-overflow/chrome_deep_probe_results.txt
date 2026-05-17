@@ -1,0 +1,93 @@
+Chrome 150 WebNN — Deep Attack Surface Probe
+=============================================
+Date:    2026-05-17
+Chrome:  150.0.0.0 (linux-amd64)
+Goal:    Determine if XNNPACK Conv2D indirection buffer overflow is reachable
+         through any WebNN path, including non-obvious ones.
+
+
+PROBE 1 — Tensor element-count threshold
+-----------------------------------------
+Chrome's WebNN rejects any tensor whose total byte size >= 2^32 (4 GB).
+For float32 (4 bytes/element): max allowed elements = 2^30 = 1,073,741,824.
+
+  [1, 500000000, 1, 1]   500M elements  2.0 GB  -> OK
+  [1, 32768, 32768, 1]  1073M elements  4.0 GB  -> REJECTED  "tensor size 4294..."
+  [1, 65536, 65536, 1]  4294M elements  16 GB   -> REJECTED
+
+Threshold: total byte size must be < 4,294,967,296 (2^32 bytes exactly).
+
+
+PROBE 2 — conv2d with large kernel
+------------------------------------
+Testing whether a large kernel reduces the required OH*OW to within Chrome's limit.
+
+  in=[1,10001,10001,1]  k=3x3   -> DOMException: Conv2d doesn't support configurations
+  in=[1,10001,10001,1]  k=255x255 -> DOMException: Conv2d doesn't support configurations
+
+Chrome rejects the graph at build() for these spatial sizes, before XNNPACK runs.
+
+
+PROBE 3 — convTranspose2d (large output from small input)
+----------------------------------------------------------
+Checking whether Chrome validates OUTPUT tensor size for transposed conv.
+If only input is checked, a small input + large stride = large output might slip through.
+
+  in=[1,1001,1001,1] stride=1000  out≈[1M,1M,1]  outElems=1e12  -> REJECTED at convTranspose2d()
+  in=[1,3001,3001,1] stride=1000  out≈[3M,3M,1]  outElems=9e12  -> REJECTED at convTranspose2d()
+  in=[1,10000,10000,1] stride=1000 out≈[10M,10M,1] outElems=1e14 -> REJECTED at convTranspose2d()
+
+Chrome validates the INFERRED OUTPUT shape for all ops.  No bypass via transposed conv.
+
+
+PROBE 4 — convTranspose2d targeting exact overflow math
+---------------------------------------------------------
+  in=[1,1000,1000,1] stride=[506165,506169]  outElems≈2.56e17
+  -> REJECTED at convTranspose2d():  "The number of elements is too large."
+
+
+PROBE 5 — averagePool2d
+------------------------
+  [1,100000,100000,1]  1e10 elements  -> REJECTED at input()
+
+Chrome applies the same 4 GB limit to all op types.
+
+
+OVERFLOW MATH vs CHROME LIMIT
+------------------------------
+XNNPACK overflow condition (3x3 kernel, mr=7):
+  8 * 9 * round_up(OH*OW, 7) >= 2^64
+  OH * OW >= 2.562e17
+
+Chrome's maximum allowed OH*OW:
+  2^30 = 1.073e9  (limited by 4 GB tensor size cap)
+
+Gap: Chrome's max is 2.562e17 / 1.073e9 = 238,724,685x BELOW the overflow threshold.
+
+For other kernel sizes:
+  5x5   kernel: need OH*OW >= 9.22e16   (Chrome max: 1.07e9)  NO
+  7x7   kernel: need OH*OW >= 4.71e16   (Chrome max: 1.07e9)  NO
+  255x255:       need OH*OW >= 3.55e13   (Chrome max: 1.07e9)  NO
+
+Kernel size that would bring overflow threshold within Chrome's limit:
+  ksize >= 2,147,483,649  (~46,340 x 46,340 kernel)
+  -> Physically impossible; XNNPACK has no such micro-kernel
+
+
+CONCLUSION
+----------
+Chrome 150 is NOT exploitable via WebNN for this vulnerability.
+
+The 4 GB tensor byte-size cap (enforced in Blink before any XNNPACK call) creates
+a mathematical impossibility: the minimum OH*OW needed to overflow the XNNPACK
+indirection buffer (2.56e17 for 3x3 kernel) is ~239 million times larger than
+Chrome's maximum allowed tensor size (1.07e9 elements).
+
+The cap also applies to:
+  - input tensors     (MLGraphBuilder.input)
+  - output tensors    (all ops validate inferred output shape)
+  - convTranspose2d   (large strides cannot bypass the output check)
+  - pool2d and others (same guard)
+
+The underlying XNNPACK library has no such cap.  Applications calling XNNPACK
+or TFLite directly remain fully vulnerable.
