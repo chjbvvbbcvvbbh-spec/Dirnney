@@ -1,0 +1,141 @@
+XNNPACK Conv2D Indirection Buffer Integer Overflow
+===================================================
+Date:     2026-05-17
+Target:   google/XNNPACK  commit 1052f90 (latest main)
+Affected: All embedders using XNNPACK CPU backend (TFLite, PyTorch Mobile, etc.)
+Severity: Critical
+
+
+VULNERABILITY
+-------------
+Integer overflow in reshape_igemm() when computing the indirection buffer
+size for Conv2D.  No overflow check exists on the multiplication:
+
+  src/operators/convolution-nhwc.c:2624
+  const size_t indirection_buffer_size =
+      sizeof(void*) * kernel_size * tiled_output_size;
+
+With output shape [1, 506164740, 506168760, 2], kernel 3x3, stride 1:
+
+  tiled_output_size = round_up(506164740 * 506168760, mr=7)
+                    = 256,204,778,801,522,404
+  indirection_buffer_size = 8 * 9 * 256,204,778,801,522,404
+                          = 18,446,744,073,709,613,088
+                          mod 2^64 = 61,472  <-- allocated
+
+xnn_reallocate_memory(61472) succeeds.  xnn_indirection_init_conv2d then
+writes ~17 TB of pointers into that 61 KB buffer -> heap corruption.
+
+Crash site (ASAN): indirection.c:63 in xnn_indirection_init_conv2d
+Crash site (release): xnn_indirection_init_conv2d+1539, SIGSEGV/SEGV_MAPERR
+
+
+REPRODUCTION
+------------
+
+--- Method 1: Direct XNNPACK API ---
+
+Build XNNPACK with ASAN:
+  cmake -DCMAKE_C_FLAGS="-fsanitize=address,undefined" ...
+
+Call sequence that triggers the overflow:
+  xnn_initialize(NULL)
+  xnn_create_subgraph(...)
+  xnn_define_tensor_value(... [1,506164742,506168762,1] ...)  // input
+  xnn_define_tensor_value(... [1,506164740,506168760,2] ...)  // output
+  xnn_define_convolution_2d(... kernel=3x3, stride=1, VALID padding ...)
+  xnn_create_runtime_v4(...)
+  xnn_reshape_runtime(...)  <-- overflow here
+
+ASAN output:
+  ERROR: AddressSanitizer: heap-buffer-overflow
+  #0 xnn_indirection_init_conv2d  indirection.c:63
+  #1 reshape_igemm                convolution-nhwc.c:2691
+  #2 xnn_reshape_convolution2d_nhwc_f32
+  #3 xnn_reshape_runtime
+
+
+--- Method 2: Crafted .tflite Model ---
+
+The .tflite format is FlatBuffers (schema v3).  Built the model in pure Python
+using the flatbuffers library without TensorFlow:
+
+  pip install flatbuffers tflite-runtime
+
+Model structure written manually:
+  - 4 Buffer tables: empty (input placeholder), filter zeros (72 bytes),
+    bias zeros (8 bytes), empty (output placeholder)
+  - 4 Tensor tables with shapes:
+      input  [1, 506164742, 506168762, 1]  FLOAT32  buffer=0
+      filter [2, 3, 3, 1]                  FLOAT32  buffer=1
+      bias   [2]                           FLOAT32  buffer=2
+      output [1, 506164740, 506168760, 2]  FLOAT32  buffer=3
+  - OperatorCode: builtin_code=3 (CONV_2D)
+      PrependByteSlot(0, 3)   // deprecated_builtin_code (field 0, byte)
+      PrependInt32Slot(3, 3)  // builtin_code (field 3, int32)
+  - Conv2DOptions: padding=VALID(1), stride_h=1, stride_w=1, dilation=1
+  - TFLite file identifier "TFL3" inserted at bytes 4-7; root offset
+    at bytes 0-3 incremented by 4 to compensate for the insertion
+
+Key schema values (wrong values will silently produce a broken model):
+  TensorType FLOAT32 = 0  (not 1, which is FLOAT16)
+  Padding    VALID   = 1  (not 2)
+
+Load it:
+  import tflite_runtime.interpreter as tflite
+  interp = tflite.Interpreter(model_path="crafted_conv2d.tflite")
+  interp.allocate_tensors()  <-- crash: MemoryError: std::bad_alloc
+
+TFLite passes the model to the XNNPACK delegate unchanged.  allocate_tensors()
+calls PrepareOps() -> reshape_igemm -> overflow.
+
+
+TESTED EMBEDDERS
+----------------
+
+TFLite  2.14.0 (tflite-runtime Python package)
+  -> MemoryError: std::bad_alloc on allocate_tensors()  VULNERABLE
+
+XNNPACK direct API, release build -O2
+  -> SIGSEGV at xnn_indirection_init_conv2d+1539        VULNERABLE
+
+XNNPACK direct API, ASAN/UBSAN build
+  -> heap-buffer-overflow confirmed                      VULNERABLE
+
+Chrome 150 WebNN API (navigator.ml)
+  -> TypeError at MLGraphBuilder.input():
+     "Invalid descriptor: The number of elements is too large."
+  -> Blink rejects the tensor before XNNPACK is called  NOT VULNERABLE
+     (Chrome's input validation is not part of XNNPACK)
+
+
+FIX
+---
+Replace the unchecked multiplication with overflow-safe arithmetic.
+xnn_safe_mul() already exists in src/xnnpack/math.h:662 but is not used here.
+
+  // convolution-nhwc.c:2624 — replace:
+  const size_t indirection_buffer_size =
+      sizeof(void*) * kernel_size * tiled_output_size;
+
+  // with:
+  size_t indirection_buffer_size;
+  if (!xnn_safe_mul(sizeof(void*), kernel_size, &indirection_buffer_size) ||
+      !xnn_safe_mul(indirection_buffer_size, tiled_output_size,
+                    &indirection_buffer_size)) {
+      return xnn_status_out_of_memory;
+  }
+
+Same pattern should be applied to all other indirection buffer size
+calculations in the file (dwconv path, etc.).
+
+
+FILES
+-----
+poc_minimal_release.c      minimal C PoC, release build, SIGSEGV handler
+poc_igemm_overflow.c       full igemm path C PoC
+make_crafted_tflite.py     .tflite model generator
+crafted_conv2d.tflite      676-byte crafted model
+asan_igemm_output.txt      full ASAN output
+PRODUCTION_VERIFICATION_REPORT.txt  full crash traces + arithmetic
+chrome_webnn_test_result.txt        Chrome 150 WebNN test output
