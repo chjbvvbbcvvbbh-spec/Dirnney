@@ -1,0 +1,83 @@
+Note (XNNPACK): l1_data_cache_bytes=32768, l1_data_cache_line_size=64, l1_data_cache_associativity=8, l1_data_cache_num_sets=64. (init_hardware_config, /home/user/xnnpack-vuln/XNNPACK/src/configs/hardware-config.c:466)
+Note (XNNPACK): l2_data_cache_bytes=1048576, l2_data_cache_line_size=64, l2_data_cache_associativity=16, l2_data_cache_num_sets=1024. (init_hardware_config, /home/user/xnnpack-vuln/XNNPACK/src/configs/hardware-config.c:485)
+Note (XNNPACK): Using igemm microkernel 'xnn_f32_igemm_minmax_ukernel_1x32__avx512f_broadcast'. (init_f32_igemm_config, /home/user/xnnpack-vuln/XNNPACK/src/configs/gemm-config.c:1419)
+Note (XNNPACK): Using igemm microkernel 'xnn_f32_igemm_minmax_ukernel_7x32__avx512f_broadcast'. (init_f32_igemm_config, /home/user/xnnpack-vuln/XNNPACK/src/configs/gemm-config.c:1420)
+Note (XNNPACK): Using gemm microkernel 'xnn_f32_gemm_minmax_ukernel_1x16__avx512f_broadcast'. (init_f32_gemm_nr2_config_impl, /home/user/xnnpack-vuln/XNNPACK/src/configs/gemm-config.c:1650)
+Note (XNNPACK): Using gemm microkernel 'xnn_f32_gemm_minmax_ukernel_7x16__avx512f_broadcast'. (init_f32_gemm_nr2_config_impl, /home/user/xnnpack-vuln/XNNPACK/src/configs/gemm-config.c:1651)
+Note (XNNPACK): Using igemm microkernel 'xnn_f32_igemm_minmax_ukernel_1x16__avx512f_broadcast'. (init_f32_gemm_nr2_config_impl, /home/user/xnnpack-vuln/XNNPACK/src/configs/gemm-config.c:1652)
+Note (XNNPACK): Using igemm microkernel 'xnn_f32_igemm_minmax_ukernel_7x16__avx512f_broadcast'. (init_f32_gemm_nr2_config_impl, /home/user/xnnpack-vuln/XNNPACK/src/configs/gemm-config.c:1653)
+Note (XNNPACK): Using gemm microkernel 'xnn_f32_gemm_minmax_ukernel_1x16__avx512f_broadcast'. (init_f32_gemm_nr2_config_impl, /home/user/xnnpack-vuln/XNNPACK/src/configs/gemm-config.c:1650)
+Note (XNNPACK): Using gemm microkernel 'xnn_f32_gemm_minmax_ukernel_7x16__avx512f_broadcast'. (init_f32_gemm_nr2_config_impl, /home/user/xnnpack-vuln/XNNPACK/src/configs/gemm-config.c:1651)
+Note (XNNPACK): Using igemm microkernel 'xnn_f32_igemm_minmax_ukernel_1x16__avx512f_broadcast'. (init_f32_gemm_nr2_config_impl, /home/user/xnnpack-vuln/XNNPACK/src/configs/gemm-config.c:1652)
+Note (XNNPACK): Using igemm microkernel 'xnn_f32_igemm_minmax_ukernel_7x16__avx512f_broadcast'. (init_f32_gemm_nr2_config_impl, /home/user/xnnpack-vuln/XNNPACK/src/configs/gemm-config.c:1653)
+Note (XNNPACK): Using dwconv microkernel 'xnn_f32_dwconv_minmax_ukernel_3p16c__avx512f'. (init_f32_dwconv_config, /home/user/xnnpack-vuln/XNNPACK/src/configs/dwconv-config.c:249)
+Note (XNNPACK): Using dwconv microkernel 'xnn_f32_dwconv_minmax_ukernel_4p16c__avx512f'. (init_f32_dwconv_config, /home/user/xnnpack-vuln/XNNPACK/src/configs/dwconv-config.c:254)
+Note (XNNPACK): Using dwconv microkernel 'xnn_f32_dwconv_minmax_ukernel_9p16c__avx512f'. (init_f32_dwconv_config, /home/user/xnnpack-vuln/XNNPACK/src/configs/dwconv-config.c:259)
+Note (XNNPACK): Using dwconv microkernel 'xnn_f32_dwconv_minmax_ukernel_25p16c__avx512f'. (init_f32_dwconv_config, /home/user/xnnpack-vuln/XNNPACK/src/configs/dwconv-config.c:264)
+Note (XNNPACK): Using vmulcaddc microkernel 'xnn_f32_vmulcaddc_minmax_ukernel_c4__sse_2x'. (init_f32_vmulcaddc_config, /home/user/xnnpack-vuln/XNNPACK/src/configs/vmulcaddc-config.c:100)
+Debug (XNNPACK): using dwconv unipass of primary_tile 3 (create_dwconv_path, /home/user/xnnpack-vuln/XNNPACK/src/operators/convolution-nhwc.c:258)
+Debug (XNNPACK): allocated 256 bytes for packed weights in Convolution (NHWC, F32) operator (create_dwconv_path, /home/user/xnnpack-vuln/XNNPACK/src/operators/convolution-nhwc.c:300)
+Debug (XNNPACK): allocated 640 bytes for packed weights in Convolution (NHWC, F32) operator (create_igemm, /home/user/xnnpack-vuln/XNNPACK/src/operators/convolution-nhwc.c:424)
+Debug (XNNPACK): reshaping operator 0 (Convolution (NHWC, F32)) (xnn_reshape_runtime, /home/user/xnnpack-vuln/XNNPACK/src/runtime.c:877)
+Debug (XNNPACK): allocated 61472 bytes for indirection buffer in Convolution (NHWC, F32) operator (reshape_igemm, /home/user/xnnpack-vuln/XNNPACK/src/operators/convolution-nhwc.c:2676)
+=================================================================
+==19189==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x53000000f420 at pc 0x562a5d11615d bp 0x7ffd35f816f0 sp 0x7ffd35f816e8
+WRITE of size 8 at 0x53000000f420 thread T0
+    #0 0x562a5d11615c in xnn_indirection_init_conv2d /home/user/xnnpack-vuln/XNNPACK/src/indirection.c:63:41
+    #1 0x562a5cf9e1cc in reshape_igemm /home/user/xnnpack-vuln/XNNPACK/src/operators/convolution-nhwc.c:2691:7
+    #2 0x562a5cf84f2a in reshape_convolution2d_nhwc /home/user/xnnpack-vuln/XNNPACK/src/operators/convolution-nhwc.c:3220:14
+    #3 0x562a5cf8996d in xnn_reshape_convolution2d_nhwc_f32 /home/user/xnnpack-vuln/XNNPACK/src/operators/convolution-nhwc.c:3446:10
+    #4 0x562a5ceb6ae2 in reshape_convolution_operator /home/user/xnnpack-vuln/XNNPACK/src/subgraph/convolution-2d.c:699:16
+    #5 0x562a5ce413e4 in xnn_reshape_runtime /home/user/xnnpack-vuln/XNNPACK/src/runtime.c:878:30
+    #6 0x562a5ce2c587 in main /home/user/xnnpack-vuln/poc_igemm_overflow.c:151:18
+    #7 0x7f562da2a1c9 in __libc_start_call_main csu/../sysdeps/nptl/libc_start_call_main.h:58:16
+    #8 0x7f562da2a28a in __libc_start_main csu/../csu/libc-start.c:360:3
+    #9 0x562a5cd505a4 in _start (/home/user/xnnpack-vuln/poc_igemm_overflow+0x40f5a4) (BuildId: 5143c90d1bbb2f0086ace92622d589b5f6035090)
+
+0x53000000f420 is located 0 bytes after 61472-byte region [0x530000000400,0x53000000f420)
+allocated by thread T0 here:
+    #0 0x562a5cdeb810 in realloc (/home/user/xnnpack-vuln/poc_igemm_overflow+0x4aa810) (BuildId: 5143c90d1bbb2f0086ace92622d589b5f6035090)
+    #1 0x562a5cf9d822 in xnn_reallocate_memory /home/user/xnnpack-vuln/XNNPACK/./src/xnnpack/allocator.h:46:10
+    #2 0x562a5cf9d822 in reshape_igemm /home/user/xnnpack-vuln/XNNPACK/src/operators/convolution-nhwc.c:2663:55
+    #3 0x562a5cf84f2a in reshape_convolution2d_nhwc /home/user/xnnpack-vuln/XNNPACK/src/operators/convolution-nhwc.c:3220:14
+    #4 0x562a5cf8996d in xnn_reshape_convolution2d_nhwc_f32 /home/user/xnnpack-vuln/XNNPACK/src/operators/convolution-nhwc.c:3446:10
+    #5 0x562a5ceb6ae2 in reshape_convolution_operator /home/user/xnnpack-vuln/XNNPACK/src/subgraph/convolution-2d.c:699:16
+    #6 0x562a5ce413e4 in xnn_reshape_runtime /home/user/xnnpack-vuln/XNNPACK/src/runtime.c:878:30
+    #7 0x562a5ce2c587 in main /home/user/xnnpack-vuln/poc_igemm_overflow.c:151:18
+    #8 0x7f562da2a1c9 in __libc_start_call_main csu/../sysdeps/nptl/libc_start_call_main.h:58:16
+    #9 0x7f562da2a28a in __libc_start_main csu/../csu/libc-start.c:360:3
+    #10 0x562a5cd505a4 in _start (/home/user/xnnpack-vuln/poc_igemm_overflow+0x40f5a4) (BuildId: 5143c90d1bbb2f0086ace92622d589b5f6035090)
+
+SUMMARY: AddressSanitizer: heap-buffer-overflow /home/user/xnnpack-vuln/XNNPACK/src/indirection.c:63:41 in xnn_indirection_init_conv2d
+Shadow bytes around the buggy address:
+  0x53000000f180: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x53000000f200: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x53000000f280: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x53000000f300: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x53000000f380: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+=>0x53000000f400: 00 00 00 00[fa]fa fa fa fa fa fa fa fa fa fa fa
+  0x53000000f480: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x53000000f500: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x53000000f580: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x53000000f600: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x53000000f680: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==19189==ABORTING

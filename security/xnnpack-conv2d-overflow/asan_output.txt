@@ -1,0 +1,39 @@
+Note (XNNPACK): l1_data_cache_bytes=32768, l1_data_cache_line_size=64, l1_data_cache_associativity=8, l1_data_cache_num_sets=64. (init_hardware_config, /home/user/xnnpack-vuln/XNNPACK/src/configs/hardware-config.c:466)
+Note (XNNPACK): l2_data_cache_bytes=1048576, l2_data_cache_line_size=64, l2_data_cache_associativity=16, l2_data_cache_num_sets=1024. (init_hardware_config, /home/user/xnnpack-vuln/XNNPACK/src/configs/hardware-config.c:485)
+Debug (XNNPACK): v003 is a constant: 0.000000e+00. (xnn_subgraph_optimize_common_subgraphs, /home/user/xnnpack-vuln/XNNPACK/src/subgraph.c:3854)
+Note (XNNPACK): Using igemm microkernel 'xnn_f32_igemm_minmax_ukernel_1x32__avx512f_broadcast'. (init_f32_igemm_config, /home/user/xnnpack-vuln/XNNPACK/src/configs/gemm-config.c:1419)
+Note (XNNPACK): Using igemm microkernel 'xnn_f32_igemm_minmax_ukernel_7x32__avx512f_broadcast'. (init_f32_igemm_config, /home/user/xnnpack-vuln/XNNPACK/src/configs/gemm-config.c:1420)
+Note (XNNPACK): Using gemm microkernel 'xnn_f32_gemm_minmax_ukernel_1x16__avx512f_broadcast'. (init_f32_gemm_nr2_config_impl, /home/user/xnnpack-vuln/XNNPACK/src/configs/gemm-config.c:1650)
+Note (XNNPACK): Using gemm microkernel 'xnn_f32_gemm_minmax_ukernel_7x16__avx512f_broadcast'. (init_f32_gemm_nr2_config_impl, /home/user/xnnpack-vuln/XNNPACK/src/configs/gemm-config.c:1651)
+Note (XNNPACK): Using igemm microkernel 'xnn_f32_igemm_minmax_ukernel_1x16__avx512f_broadcast'. (init_f32_gemm_nr2_config_impl, /home/user/xnnpack-vuln/XNNPACK/src/configs/gemm-config.c:1652)
+Note (XNNPACK): Using igemm microkernel 'xnn_f32_igemm_minmax_ukernel_7x16__avx512f_broadcast'. (init_f32_gemm_nr2_config_impl, /home/user/xnnpack-vuln/XNNPACK/src/configs/gemm-config.c:1653)
+Note (XNNPACK): Using gemm microkernel 'xnn_f32_gemm_minmax_ukernel_1x16__avx512f_broadcast'. (init_f32_gemm_nr2_config_impl, /home/user/xnnpack-vuln/XNNPACK/src/configs/gemm-config.c:1650)
+Note (XNNPACK): Using gemm microkernel 'xnn_f32_gemm_minmax_ukernel_7x16__avx512f_broadcast'. (init_f32_gemm_nr2_config_impl, /home/user/xnnpack-vuln/XNNPACK/src/configs/gemm-config.c:1651)
+Note (XNNPACK): Using igemm microkernel 'xnn_f32_igemm_minmax_ukernel_1x16__avx512f_broadcast'. (init_f32_gemm_nr2_config_impl, /home/user/xnnpack-vuln/XNNPACK/src/configs/gemm-config.c:1652)
+Note (XNNPACK): Using igemm microkernel 'xnn_f32_igemm_minmax_ukernel_7x16__avx512f_broadcast'. (init_f32_gemm_nr2_config_impl, /home/user/xnnpack-vuln/XNNPACK/src/configs/gemm-config.c:1653)
+Note (XNNPACK): Using dwconv microkernel 'xnn_f32_dwconv_minmax_ukernel_3p16c__avx512f'. (init_f32_dwconv_config, /home/user/xnnpack-vuln/XNNPACK/src/configs/dwconv-config.c:249)
+Note (XNNPACK): Using dwconv microkernel 'xnn_f32_dwconv_minmax_ukernel_4p16c__avx512f'. (init_f32_dwconv_config, /home/user/xnnpack-vuln/XNNPACK/src/configs/dwconv-config.c:254)
+Note (XNNPACK): Using dwconv microkernel 'xnn_f32_dwconv_minmax_ukernel_9p16c__avx512f'. (init_f32_dwconv_config, /home/user/xnnpack-vuln/XNNPACK/src/configs/dwconv-config.c:259)
+Note (XNNPACK): Using dwconv microkernel 'xnn_f32_dwconv_minmax_ukernel_25p16c__avx512f'. (init_f32_dwconv_config, /home/user/xnnpack-vuln/XNNPACK/src/configs/dwconv-config.c:264)
+Note (XNNPACK): Using vmulcaddc microkernel 'xnn_f32_vmulcaddc_minmax_ukernel_c4__sse_2x'. (init_f32_vmulcaddc_config, /home/user/xnnpack-vuln/XNNPACK/src/configs/vmulcaddc-config.c:100)
+Debug (XNNPACK): using dwconv unipass of primary_tile 3 (create_dwconv_path, /home/user/xnnpack-vuln/XNNPACK/src/operators/convolution-nhwc.c:258)
+Debug (XNNPACK): allocated 256 bytes for packed weights in Convolution (NHWC, F32) operator (create_dwconv_path, /home/user/xnnpack-vuln/XNNPACK/src/operators/convolution-nhwc.c:300)
+Debug (XNNPACK): using dwconv unipass of primary_tile 9 (create_dwconv_path, /home/user/xnnpack-vuln/XNNPACK/src/operators/convolution-nhwc.c:258)
+Debug (XNNPACK): allocated 640 bytes for packed weights in Convolution (NHWC, F32) operator (create_dwconv_path, /home/user/xnnpack-vuln/XNNPACK/src/operators/convolution-nhwc.c:300)
+Debug (XNNPACK): reshaping operator 0 (Convolution (NHWC, F32)) (xnn_reshape_runtime, /home/user/xnnpack-vuln/XNNPACK/src/runtime.c:877)
+=================================================================
+==15591==ERROR: AddressSanitizer: requested allocation size 0x5555555afd7bc5c0 (0x5555555afd7bd5c0 after adjustments for alignment, red zones etc.) exceeds maximum supported size of 0x10000000000 (thread T0)
+    #0 0x55f780a16810 in realloc (/home/user/xnnpack-vuln/poc_conv2d_overflow+0x4aa810) (BuildId: a89fb1d15de3241f45f1dad8d0306854d68c3077)
+    #1 0x55f780bcef22 in xnn_reallocate_memory /home/user/xnnpack-vuln/XNNPACK/./src/xnnpack/allocator.h:46:10
+    #2 0x55f780bcef22 in reshape_dwconv /home/user/xnnpack-vuln/XNNPACK/src/operators/convolution-nhwc.c:2959:55
+    #3 0x55f780bb4a0d in xnn_reshape_convolution2d_nhwc_f32 /home/user/xnnpack-vuln/XNNPACK/src/operators/convolution-nhwc.c:3446:10
+    #4 0x55f780ae1b82 in reshape_convolution_operator /home/user/xnnpack-vuln/XNNPACK/src/subgraph/convolution-2d.c:699:16
+    #5 0x55f780a6c484 in xnn_reshape_runtime /home/user/xnnpack-vuln/XNNPACK/src/runtime.c:878:30
+    #6 0x55f780a575fe in main /home/user/xnnpack-vuln/poc_conv2d_overflow.c:170:18
+    #7 0x7fa3f4e2a1c9 in __libc_start_call_main csu/../sysdeps/nptl/libc_start_call_main.h:58:16
+    #8 0x7fa3f4e2a28a in __libc_start_main csu/../csu/libc-start.c:360:3
+    #9 0x55f78097b5a4 in _start (/home/user/xnnpack-vuln/poc_conv2d_overflow+0x40f5a4) (BuildId: a89fb1d15de3241f45f1dad8d0306854d68c3077)
+
+==15591==HINT: if you don't care about these errors you may set allocator_may_return_null=1
+SUMMARY: AddressSanitizer: allocation-size-too-big (/home/user/xnnpack-vuln/poc_conv2d_overflow+0x4aa810) (BuildId: a89fb1d15de3241f45f1dad8d0306854d68c3077) in realloc
+==15591==ABORTING

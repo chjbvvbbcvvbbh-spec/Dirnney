@@ -1,0 +1,97 @@
+XNNPACK Conv2D Indirection Buffer Integer Overflow — Sanitizer Verification
+==========================================================================
+
+Date: 2026-05-17
+XNNPACK commit: 1052f90 (latest main, cloned 2026-05-17)
+Host: x86_64, Ubuntu 24.04, clang-18 + ASAN + UBSAN
+Build flags: -fsanitize=address,undefined -fno-omit-frame-pointer -g -O1
+
+
+CONFIRMED FINDINGS
+------------------
+
+1. igemm Path — HEAP BUFFER OVERFLOW (ASAN: heap-buffer-overflow)
+   File: src/operators/convolution-nhwc.c:2624-2625 (reshape_igemm)
+         src/indirection.c:63 (xnn_indirection_init_conv2d)
+
+   Trigger: 1->2 channel conv2d, 3x3 kernel, stride=1
+     input:  [1, 506164742, 506168762, 1]
+     output: [1, 506164740, 506168760, 2]
+
+   Root cause:
+     const size_t indirection_buffer_size =
+         sizeof(void*) * kernel_size * tiled_output_size;
+     = 8 * 9 * 256,204,778,801,522,404
+     = 18,446,744,073,709,613,088  (overflows uint64)
+     mod 2^64 = 61,472 bytes       ← allocated (succeeds!)
+
+   xnn_indirection_init_conv2d then writes ~17 TB into that 61 KB buffer.
+
+   ASAN output (key lines):
+     Debug (XNNPACK): allocated 61472 bytes for indirection buffer
+         (reshape_igemm, convolution-nhwc.c:2676)
+     ERROR: AddressSanitizer: heap-buffer-overflow
+         at xnn_indirection_init_conv2d (indirection.c:63)
+         in reshape_igemm (convolution-nhwc.c:2691)
+         in xnn_reshape_convolution2d_nhwc_f32 (convolution-nhwc.c:3446)
+         in xnn_reshape_runtime (runtime.c:878)
+   SUMMARY: AddressSanitizer: heap-buffer-overflow
+            /XNNPACK/src/indirection.c:63 in xnn_indirection_init_conv2d
+
+
+2. dwconv Path — EXCESSIVE ALLOCATION (ASAN: allocation-size-too-big)
+   File: src/operators/convolution-nhwc.c:2913 (reshape_dwconv)
+
+   Trigger: depthwise conv2d (1->1 channel), 3x3 kernel, stride=1
+     input:  [1, 506164742, 506168762, 1]
+     output: [1, 506164740, 506168760, 1]
+
+   Root cause:
+     const size_t indirection_buffer_size =
+         round_up_po2(sizeof(void*) * (primary_tile - kernel_size +
+                                       output_height * step_height), alignment);
+     = 8 * (0 + 506164740 * 1518506280) = ~6.1 exabytes
+
+   ASAN blocks the allocation as "allocation-size-too-big".
+
+   ASAN output (key lines):
+     ERROR: AddressSanitizer: requested allocation size 0x5555555afd7bc5c0
+         exceeds maximum supported size of 0x10000000000
+         at reshape_dwconv (convolution-nhwc.c:2959)
+         in xnn_reshape_convolution2d_nhwc_f32 (convolution-nhwc.c:3446)
+   SUMMARY: AddressSanitizer: allocation-size-too-big in realloc
+
+
+OVERFLOW MATH (igemm path)
+--------------------------
+  output_height           = 506,164,740
+  output_width            = 506,168,760
+  output_size (OH*OW)     = 256,204,778,801,522,400  (fits uint64)
+  tiled_output_size (mr=7)= 256,204,778,801,522,404
+  ptr_size * 9 * tiled    = 18,446,744,073,709,613,088  (true value)
+  mod 2^64                = 61,472 bytes  ← xnn_reallocate_memory receives this
+  Actual write range      = 18,446,744,073,709,613,088 bytes (~17 TB)
+  Overflow ratio          = 300,083,681,573,881x
+
+
+VULNERABLE CODE (convolution-nhwc.c:2624)
+------------------------------------------
+  // igemm path — no overflow check:
+  const size_t indirection_buffer_size =
+      sizeof(void*) * kernel_size * tiled_output_size;  // ← wraps to 61 KB
+
+  // Fix: use xnn_safe_mul() already available in src/xnnpack/math.h:662
+  size_t indirection_buffer_size;
+  if (!xnn_safe_mul(sizeof(void*), kernel_size, &indirection_buffer_size) ||
+      !xnn_safe_mul(indirection_buffer_size, tiled_output_size,
+                    &indirection_buffer_size)) {
+      return xnn_status_out_of_memory;
+  }
+
+
+PROOF-OF-CONCEPT FILES
+-----------------------
+  poc_conv2d_overflow.c  — dwconv path PoC (PoC #1)
+  poc_igemm_overflow.c   — igemm path PoC (PoC #2, confirmed heap-buffer-overflow)
+  asan_output.txt        — ASAN output for dwconv path
+  asan_igemm_output.txt  — ASAN output for igemm path (critical finding)
