@@ -1,0 +1,264 @@
+Renderer RCE Attack Surface — Chrome 150 Static Analysis
+=========================================================
+Date:    2026-05-17
+Browser: Chromium 150.0.7844.0
+Scope:   Renderer process — JS-reachable paths to memory corruption
+Goal:    Identify Stage 1 for Finding 1 GPU process chain
+
+
+METHODOLOGY
+───────────────────────────────────────────────────────────────────────────
+
+Static analysis of available Chromium source:
+  third_party/blink/renderer/        (Blink renderer — full source)
+  third_party/libxslt/src/           (libxslt 1.1.45 — full C source)
+  third_party/libxml/src/            (libxml2 2.14.6 — full C source)
+
+Not available in this checkout (binary-only):
+  v8/                                (V8 JavaScript engine)
+  third_party/libwebp/               (libwebp — only metadata)
+  third_party/skia/                  (Skia — only metadata)
+
+Approach:
+  1. Search UNSAFE_TODO / UNSAFE_BUFFERS sites in Blink
+  2. Trace all multiplication/allocation patterns reachable from JS
+  3. Look for C libraries lacking CheckedNumeric (libxslt, libxml2)
+  4. Examine DOM callback/GC lifecycle for UAF patterns
+
+
+════════════════════════════════════════════════════════════════════════════
+PART 1 — BLINK RENDERER (ALL HARDENED, NO EXPLOITABLE BUGS FOUND)
+════════════════════════════════════════════════════════════════════════════
+
+All JS-accessible Blink module paths use base::CheckedNumeric<T> or
+base::span<T> throughout. Every multiplication, allocation, and copy
+operation uses checked arithmetic. Overflows throw TypeError or return 0.
+
+Modules examined and confirmed safe:
+  WebGL  (webgl_rendering_context_base.cc, webgl2_rendering_context_base.cc)
+  WebGPU (gpu_queue.cc — EstimateWriteTextureBytesUpperBound)
+  WebAudio (audio_buffer.cc — copyFromChannel/copyToChannel)
+  WebCodecs (audio_data.cc, video_frame.cc, video_frame_layout.cc,
+             background_readback.cc)
+  WebNN renderer-side (ml_tensor.cc, operand_descriptor.cc)
+  Compression API (inflate_transformer.cc — fixed output buffer)
+  HTML fast-path parser (html_document_parser_fastpath.cc — SIMD bounded)
+  ICU text break iterator (text_break_iterator_icu.cc — struct size bounded)
+  NFC NDEF record (ndef_record.cc — simple string loop)
+  Gamepad shared memory (gamepad_shared_memory_reader.cc — fixed sizeof)
+  Mojo handle (mojo_handle.cc — MojoGetMessageData provides correct num_bytes)
+
+Notable false positives investigated:
+
+  A) VideoFrameLayout::Size() line 146 — stride * rows
+     SAFE: user-layout constructor (lines 89-110) already validates
+     CheckedNumeric<uint32_t>(stride) * rows ≤ INT_MAX before storage.
+     Size() reuses the same rows computation, so product is pre-validated.
+
+  B) AudioData constructor line 353 — plane_size_in_bytes = frames * bps
+     SAFE: total_bytes = bps * channels * frames is checked via CheckMul
+     at line 283. plane_size_in_bytes = total_bytes / channels ≤ total_bytes,
+     so cannot overflow if total_bytes doesn't overflow.
+
+  C) AudioData::CopyConvert() line 629 — sample_count = frame_count * channels
+     SAFE: allocationSize() (called before copyTo() → CopyConvert()) uses
+     base::CheckMul(frame_count, channel_count) at line 490. Same values,
+     same computation — already verified non-overflowing before this call.
+
+  D) BackgroundReadback line 251 — stride * src_rect.height()
+     SAFE: VideoFrameLayout constructor validates stride * rows ≤ INT_MAX
+     via Cast<int>().IsValid() (line 94). src_rect.height() ≤ rows, so
+     stride * src_rect.height() ≤ stride * rows ≤ INT_MAX — no overflow.
+
+
+════════════════════════════════════════════════════════════════════════════
+PART 2 — C LIBRARY ATTACK SURFACES (HIGH INTEREST — LACK CheckedNumeric)
+════════════════════════════════════════════════════════════════════════════
+
+These libraries process attacker-controlled data using raw C without
+CheckedNumeric. They are the realistic renderer RCE attack surface.
+
+
+2.1 — libxslt 1.1.45 (commit 35323d6a)
+────────────────────────────────────────
+  JS entry point:   new XSLTProcessor() + transformToFragment()
+  Attacker control: Full XSLT 1.0 stylesheet content
+  Source location:  third_party/libxslt/src/libxslt/ (34,905 lines C)
+  Sandbox:          Renderer process (same as JS execution context)
+
+  What Chrome registers:
+    - Core XSLT 1.0: xsltRegisterAllFunctions() (full set)
+    - EXSLT extension: only exslt:node-set from http://exslt.org/common
+    - NOT registered: EXSLT crypto, dynamic, math, sets, strings, dates
+    - Recursion limit: kDoubleXsltMaxVars = 30,000 (defined in blink wrapper)
+
+  Analyzed patterns:
+    transform.c:838-841 — text buffer growth: explicit INT_MAX overflow check
+      (if extra > INT_MAX - ctxt->lasttsize → cap at INT_MAX — protected)
+    xslt.c:2786-2800 — xsltPointerListCreate(num) where num = first->number
+      + second->number: if both come from xmlNodeSet->nodeNr, an attacker
+      controlling node counts could make num overflow size_t; then
+      memcpy(ret->items + first->number, ...) at line 2796 writes beyond
+      the undersized allocation. Further analysis needed.
+    xsltutils.c:551 — vsnprintf macro: format strings from libxslt source,
+      not attacker-controlled. Not a format string bug.
+
+  Unanalyzed (complex, high-interest) sub-paths:
+    variables.c (2437 lines) — xsl:variable, xsl:param, scope management
+    pattern.c   (2534 lines) — XPath pattern matching, complex recursion
+    extensions.c (2403 lines) — function registration, call dispatch
+    preproc.c   (2368 lines) — stylesheet preprocessing, node construction
+
+  Recommended attack vectors via XSLT API:
+    1. <xsl:sort> with large node sets (calls xslt_unicode_sort.cc → libxslt)
+    2. <xsl:variable> with recursive templates (stack/heap expansion)
+    3. <xsl:for-each select="..."> with deep XPath expressions (pattern.c)
+    4. document() function loading external XML (DocLoaderFunc in blink wrapper)
+    5. xsl:output with encoding conversion (involves character conversion C code)
+
+  Concrete PoC harness:
+    var xslt = new XSLTProcessor();
+    var stylesheet = new DOMParser().parseFromString(`<?xml version="1.0"?>
+      <xsl:stylesheet version="1.0"
+          xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+        <xsl:template match="/">
+          <xsl:for-each select="...">
+            <xsl:sort select="..." order="..."/>
+          </xsl:for-each>
+        </xsl:template>
+      </xsl:stylesheet>`, 'text/xml');
+    xslt.importStylesheet(stylesheet);
+    xslt.transformToFragment(xmlDoc, document);
+
+
+2.2 — libxml2 2.14.6 (commit 22f9d730)
+────────────────────────────────────────
+  JS entry points:
+    new DOMParser().parseFromString(xml, 'text/xml')
+    new XMLHttpRequest() with responseType 'document'
+    Inline SVG: <svg> elements parsed as XML in HTML documents
+    XSLT: XSLTProcessor loads and parses stylesheets via libxml2
+  Attacker control: Full XML document content
+  Source location:  third_party/libxml/src/ (parser.c alone: 13,717 lines)
+
+  Analyzed patterns in parser.c:
+    line 705:  xmlRealloc(buf->mem, cap) — cap = old + extra (extra from parsed data)
+    line 731:  memcpy(buf->mem + buf->size, str, len) — only safe if buf->size+len ≤ cap
+    line 1082: xmlRealloc(defaults, ...) — default namespace expansion
+    line 1635: xmlRealloc(ctxt->nsTab, 2 * newSize * sizeof(table[0]))
+               — newSize *= 2 before realloc; could overflow for large ns count
+    line 1863: xmlRealloc(ctxt->atts, newSize * sizeof(atts[0]) * 5)
+               — multiplicand includes *5; potential overflow before realloc
+               if newSize is large enough to make newSize*sizeof()*5 wrap
+    line 2007: xmlRealloc(ctxt->nodeTab, newSize * sizeof(tmp[0]))
+               — node stack growth; newSize doubled on each expansion
+
+  Of these, line 1863 is most interesting:
+    int newSize = ctxt->attsMax * 2 + 10;
+    atts = xmlRealloc(ctxt->atts, newSize * sizeof(atts[0]) * 5);
+    // sizeof(atts[0]) = sizeof(xmlChar*) = 8 on 64-bit
+    // * 5 = 40 bytes per entry
+    // newSize up to ~INT_MAX/40 before overflow; very large XML attribute
+    // count needed, but no explicit bound visible
+    Context: This handles XML attribute overflow in parser input.
+    Need to verify: does xmlCtxtUseOptions set XML_PARSE_HUGE to limit this?
+
+  Note: libxml2 2.14.6 is recent and actively maintained. This version
+  likely has most historical parser overflows patched. Further dynamic
+  analysis (ASan fuzzing) is needed to find new bugs.
+
+  entity handling (entities.c — 719 lines):
+    Line 122, 603: xmlMalloc(sizeof(xmlEntity)) — fixed-size struct allocation.
+    No user-controlled size in entity struct allocation.
+    Entity EXPANSION (e.g., billion laughs) — limited by XML_PARSE_NOENT
+    and MAX_LOOKUP_LIMIT in libxml2 2.14.x.
+
+
+════════════════════════════════════════════════════════════════════════════
+PART 3 — SOURCE NOT PRESENT (HIGH HISTORICAL PRODUCTIVITY)
+════════════════════════════════════════════════════════════════════════════
+
+These components are in the renderer process and reachable from JS, but
+their C/C++ source is not in this Chromium checkout. Historically these
+have been the most productive renderer RCE attack classes.
+
+  3.1 — V8 JavaScript Engine (JIT/Wasm)
+    JS entry:   Any JavaScript execution
+    Attack class: JIT type confusion, OOB in compiled code, Wasm memory.grow
+    Historical: CVE-2023-2033 (V8 type confusion), CVE-2024-0519 (V8 OOB)
+                Most common renderer RCE path in Chrome
+    Notes:     V8 compiles JS to native code; JIT misoptimization can produce
+               OOB reads/writes on TypedArrays, bypassing all CheckedNumeric.
+               Wasm linear memory is directly accessible from JS.
+
+  3.2 — libwebp (WebP image decoder)
+    JS entry:   <img src="file.webp">, fetch('file.webp'), Canvas drawImage()
+    Version in Chromium: commit c00d83f6 (no version tag in README)
+    Historical: CVE-2023-4863 (critical, exploited in-the-wild)
+               Huffman tree reconstruction in lossless decode path
+    Notes:     VP8L lossless WebP has complex Huffman decoding with
+               large lookup tables allocated based on bit depth.
+               Heap OOB in VP8LDecodeImage or VP8LDecode is historically
+               productive.
+
+  3.3 — libjpeg-turbo (JPEG decoder)
+    JS entry:   <img src="file.jpg">, Canvas drawImage()
+    Notes:     SIMD-optimized DCT decode paths; occasional integer overflow
+               in row/stride calculations for SIMD-width rounding.
+
+  3.4 — libavif / libdav1d (AVIF decoder)
+    JS entry:   <img src="file.avif">
+    Notes:     AVIF is newer with less fuzzing history than JPEG/PNG/WebP.
+               AV1 bitstream parsing in libdav1d is complex C code.
+
+  3.5 — Skia (2D graphics)
+    JS entry:   Canvas 2D API, SVG rendering, CSS filters
+    Notes:     Skia image codecs and SkBitmap allocation; SkCanvas operations
+               with large clip rects can trigger internal buffer issues.
+
+
+════════════════════════════════════════════════════════════════════════════
+PART 4 — RECOMMENDED APPROACH FOR STAGE 1 RENDERER RCE
+════════════════════════════════════════════════════════════════════════════
+
+Priority order based on available source and historical productivity:
+
+Priority 1 (source available, complex C, JS-controllable):
+  → libxslt via XSLTProcessor — 34K lines C, attacker controls full stylesheet
+    Focus: variables.c (scope management), pattern.c (recursion), xslt.c:2796
+    Method: Directed fuzzing with AFL++ targeting XSLTProcessor::transformToFragment
+    PoC payload template: xsl:for-each with xsl:sort over large node sets
+
+Priority 2 (source available, complex C, XML-controllable):
+  → libxml2 via DOMParser — 13K lines in parser.c alone
+    Focus: attribute array (line 1863 newSize*sizeof()*5), namespace table (line 1635)
+    Method: Fuzzing with malformed multi-namespace XML, huge attribute counts
+
+Priority 3 (source unavailable, binary analysis needed):
+  → V8 JIT: Requires dynamic analysis (Turbofan/Maglev optimization tracing)
+  → libwebp: Requires analysis of VP8L lossless decode (historically productive)
+  → libdav1d: AV1 bitstream; newer code with less fuzzing coverage
+
+
+════════════════════════════════════════════════════════════════════════════
+SUMMARY TABLE
+════════════════════════════════════════════════════════════════════════════
+
+Component              | Source  | JS-Reachable | CheckedNumeric | RCE Risk
+───────────────────────────────────────────────────────────────────────────
+Blink WebGL/WebGPU     | Yes     | Yes          | Full           | NONE
+Blink WebAudio         | Yes     | Yes          | Full           | NONE
+Blink WebCodecs        | Yes     | Yes          | Full           | NONE
+Blink WebNN renderer   | Yes     | Yes          | Full           | NONE
+Blink DOM core         | Yes     | Yes          | ScriptForbid   | NONE
+HTML fast-path parser  | Yes     | Indirect     | DCHECK+SIMD    | VERY LOW
+libxslt 1.1.45         | Yes     | Yes (XSLT)   | NONE (C)       | MEDIUM-HIGH
+libxml2 2.14.6         | Yes     | Yes (XML)    | NONE (C)       | MEDIUM
+V8 JIT/Wasm            | No      | Yes (any JS) | N/A (JIT)      | HIGH (historic)
+libwebp                | No      | Yes (img)    | NONE (C)       | HIGH (historic)
+libjpeg-turbo          | No      | Yes (img)    | NONE (C)       | MEDIUM
+libavif/libdav1d       | No      | Yes (img)    | NONE (C)       | MEDIUM-HIGH
+
+For the Stage 1 → Stage 2 chain (Finding 1):
+  Any of the above HIGH/MEDIUM-HIGH entries serves as Stage 1.
+  XSLTProcessor provides the most directly analyzable path with full source.
