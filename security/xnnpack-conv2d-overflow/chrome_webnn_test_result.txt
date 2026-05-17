@@ -1,0 +1,58 @@
+Chrome 150 WebNN API — XNNPACK Overflow Attack Surface Test
+============================================================
+
+Date:           2026-05-17
+Chrome version: 150.0.0.0  (snapshot 1631851, linux-amd64)
+Test page:      xnnpack_overflow.html  (navigator.ml / WebNN API)
+WebNN enabled:  --enable-features=WebMachineLearningNeuralNetwork,WebNN
+Backend:        CPU  (→ XNNPACK)
+
+═══════════════════════════════════════════════════════════════
+FULL TEST LOG
+═══════════════════════════════════════════════════════════════
+
+=== XNNPACK Conv2D Overflow via WebNN ===
+UA: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko)
+    Chrome/150.0.0.0 Safari/537.36
+navigator.ml type: object
+[+] navigator.ml IS available
+[+] MLContext created (CPU → XNNPACK)
+[+] MLGraphBuilder created
+[*] Input: [1, 506164742, 506168762, 1]
+[!] WebNN exception: TypeError: Failed to execute 'input' on 'MLGraphBuilder':
+    [[input input] ] Invalid descriptor: The number of elements is too large.
+[*] Dimension validation rejected — Chrome WebNN guard active
+=== Test Complete ===
+
+═══════════════════════════════════════════════════════════════
+RESULT: GUARDED — Chrome validates tensor size before XNNPACK
+═══════════════════════════════════════════════════════════════
+
+Chrome 150's WebNN implementation rejects the malicious dimensions at the
+MLGraphBuilder.input() call in the Blink JavaScript layer.  The TypeError is
+thrown before any XNNPACK reshape_igemm / indirection buffer code is reached.
+
+Guard location (inferred from error message):
+  Blink: modules/ml/webnn/ml_graph_builder.cc
+  Check: totalByteLength > numeric_limits<size_t>::max() or similar
+
+  Product rejected:
+    1 × 506,164,742 × 506,168,762 × 1 × sizeof(float)
+    = ~1,024 exabytes  →  "The number of elements is too large."
+
+═══════════════════════════════════════════════════════════════
+IMPLICATION
+═══════════════════════════════════════════════════════════════
+
+Chrome is NOT directly exploitable via navigator.ml in version 150 because
+Blink performs an element-count overflow check before the descriptor is passed
+to the XNNPACK backend.
+
+However, the underlying XNNPACK library vulnerability (convolution-nhwc.c:2624)
+remains unpatched and is reachable via:
+
+  1. TFLite (tflite-runtime 2.14.0) — confirmed MemoryError / bad_alloc
+  2. Direct XNNPACK API — confirmed SIGSEGV (release) and heap-buffer-overflow (ASAN)
+  3. Any embedding without a Blink-equivalent dimension guard
+  4. Older Chrome/WebNN versions that may lack the guard
+  5. Android TFLite / ML Kit apps using XNNPACK CPU backend
