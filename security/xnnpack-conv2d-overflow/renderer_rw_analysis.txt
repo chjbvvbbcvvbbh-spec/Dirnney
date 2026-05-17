@@ -1,0 +1,253 @@
+Renderer Controlled Read/Write Analysis — Chrome 150 (SwiftShader)
+==================================================================
+Date:    2026-05-17
+Analyst: Source static analysis + dynamic verification
+Scope:   Blink renderer process — WebGL, WebAudio, WebCodecs, WebNN renderer-side
+Goal:    Find JS-reachable controlled OOB read/write in renderer process
+         for use as stage-1 in chain → Finding 1 GPU process overflow
+
+
+METHODOLOGY
+───────────────────────────────────────────────────────────────────────────
+
+Searched the following renderer-side code paths:
+
+  WebGL  : webgl_rendering_context_base.cc (9352 lines)
+           webgl2_rendering_context_base.cc (5877 lines)
+           gles2_implementation.cc (GPU command buffer client)
+           webgl_image_conversion.cc (ComputeImageSizeInBytes)
+           gles2_cmd_utils.cc (ComputeImageDataSizesES3)
+
+  WebGPU : gpu_queue.cc (WriteTextureImpl, WriteBufferImpl)
+           texture_utils.cc (EstimateWriteTextureBytesUpperBound)
+
+  WebAudio: audio_buffer.cc (copyFromChannel/copyToChannel)
+
+  WebCodecs: audio_data.cc (copyTo/allocationSize)
+             video_frame.cc (copyTo/allocationSize)
+
+  WebNN (renderer side): ml_tensor.cc (writeTensor/readTensor)
+                         ml_graph_builder.cc (constant/input shapes)
+                         operand_descriptor.cc (PackedByteLength)
+
+
+RESULT: NO EXPLOITABLE RENDERER-SIDE CONTROLLED R/W FOUND
+───────────────────────────────────────────────────────────────────────────
+
+Chrome 150 uses pervasive base::CheckedNumeric<T> and base::span<T>
+bounds-checked wrappers throughout all renderer-accessible code paths.
+
+1. WebGL image size arithmetic (ComputeImageSizeInBytes / ComputeImageDataSizesES3):
+   ALL multiplications use CheckedNumeric or equivalent checked arithmetic.
+   Overflow → GL_INVALID_VALUE returned, no data copied.
+
+2. WebGL bufferSubData / getBufferSubData / readPixels:
+   Offset/size validated with ValidateValueFitNonNegInt32 (caps at INT32_MAX),
+   then checked addition. No overflow path.
+
+3. WebGL texImage3D / texSubImage3D with UNPACK_IMAGE_HEIGHT:
+   padded_row_size * unpack_image_height ≤ total_size (which is validated).
+   If total_size doesn't overflow, per-image sizes also don't overflow.
+
+4. WebGPU writeTexture (EstimateWriteTextureBytesUpperBound):
+   Uses base::CheckedNumeric<size_t> for bytesPerRow * rowsPerImage * depth.
+   Overflow → returns 0 → only sends min(data.size, 0) = 0 bytes.
+
+5. WebAudio AudioBuffer copyFromChannel / copyToChannel:
+   base::span::subspan() with explicit bounds at line 264/305.
+   std::min() guards all copy counts.
+
+6. WebCodecs AudioData.copyTo() allocationSize():
+   Uses base::CheckMul for sample_count * bytes_per_channel.
+   Explicit overflow flag → ThrowTypeError on overflow.
+
+7. WebNN renderer-side (ml_tensor.cc):
+   CHECK_EQ(result->get_buffer().size(), descriptor_.PackedByteLength())
+   at readTensor result processing — mismatch crashes renderer (safe fail).
+
+8. WebGL uniform*v ValidateUniformParameters:
+   src_offset >= size → error; actual_size computed by checked subtraction;
+   total_size *= 4 via CheckedNumeric. Pointer arithmetic v+src_offset
+   is bounded by prior check.
+
+Notable pattern: UNSAFE_TODO is used at 5 sites in WebGL/WebAudio, but
+each is preceded by checked arithmetic that guarantees in-bounds access.
+
+
+CORRECTED ANALYSIS: FINDING 2 (graph_builder_tflite.cc)
+───────────────────────────────────────────────────────────────────────────
+
+Our dynamic_verification_results.txt previously claimed:
+  "resized_dimensions[1] = block_size * input_dim = 65537 * 65537
+   → int32_t overflow to 131,073"
+
+This was INCORRECT. The actual computation is:
+
+  resized_dimensions[1] = block_size * input_dimensions[axis]
+
+where input_dimensions = blockwise_scale_shape (the SCALE tensor shape),
+not the input tensor shape. Specifically:
+
+  block_size           = input_shape[axis] / scale_shape[axis]  (uint32_t)
+  input_dimensions[axis] = scale_shape[axis]  (int32_t)
+
+  block_size * input_dimensions[axis]
+    = (input_shape[axis] / scale_shape[axis]) * scale_shape[axis]
+    = input_shape[axis]   (integer division, exact if divisible)
+
+For this to overflow int32: input_shape[axis] > INT32_MAX. But:
+  (a) WebNN ValidateAndGetByteLength enforces all dimensions fit in int32_t
+  (b) kTensorByteLengthLimit = 1GB further bounds product of all dims
+
+Additionally, BlockwiseExpandAlongAxis is ONLY called when
+  scale_shape[index] != 1 AND input_shape[index] != scale_shape[index]
+For our test case (scale=[1,1,1,1,1]) this condition is always FALSE,
+so BlockwiseExpandAlongAxis was never called. The observed correct
+execution (output=[5.0,...]) was standard dequantize, not an overflow path.
+
+REVISED FINDING 2 STATUS: FALSE POSITIVE
+  The int32 multiplication overflow cannot be triggered due to:
+  (1) Dimension constraints (all dims must fit in int32_t per WebNN spec)
+  (2) 1GB tensor byte length limit
+  (3) The product always equals input_shape[axis] which is already bounded
+
+
+RENDERER CONTROLLED R/W: ALTERNATIVE PATHS
+───────────────────────────────────────────────────────────────────────────
+
+The following classes of renderer bugs were NOT fully explored due to
+requiring deeper dynamic analysis (fuzzer/JIT-level inspection):
+
+  Class A — V8 JIT type confusion:
+    If V8 miscompiles a function accessing a TypedArray, it may produce
+    OOB array accesses. Requires JIT optimization tracing, not static
+    source analysis. Chrome's V8 is a prime target for renderer bugs
+    (e.g., CVE-2023-2033, CVE-2024-0519).
+
+  Class B — Blink DOM use-after-free:
+    Freed DOM nodes referenced via JS closures. Requires heap spray to
+    control UAF target. Common in Blink history.
+
+  Class C — SharedArrayBuffer TOCTOU:
+    If size/offset read from SAB-backed typed array is used between
+    check and use, a concurrent worker can modify it. However, SAB
+    size is fixed, so only DATA (not length) can race. No currently
+    known WebGL path reads SIZE from a SAB-backed view.
+
+  Class D — Third-party library bugs in renderer:
+    Image decoders (JPEG, PNG, WebP, AVIF) run in renderer. Bugs here
+    are common (libwebp CVE-2023-4863 gave Blink renderer RCE in 2023).
+    These are NOT hardened with CheckedNumeric since they are C libraries.
+
+For a real-world attack chain using Finding 1, any Class A/B/D renderer
+bug can serve as Stage 1. Finding 1 remains the GPU process Stage 2.
+
+
+CONFIRMED ATTACK SURFACE (Finding 1 — Stage 2 Only)
+───────────────────────────────────────────────────────────────────────────
+
+gles2_cmd_decoder.cc:12629 — DecompressTextureData uint32 overflow
+
+  Trigger (from compromised renderer):
+    CompressedTexImage3D(
+        target  = GL_TEXTURE_2D_ARRAY,   ← NOT blocked by ValidateCompressedFormatTarget
+        format  = GL_COMPRESSED_RGB8_ETC2,
+        width   = 2048, height = 2048, depth = 257,
+        imageSize = 536,870,912,           ← exact match required (512 MB)
+        data    = [512 MB of valid ETC2 blocks]
+    )
+
+  GPU-process overflow:
+    output_pixel_size * width * height * depth
+    = 4 * 2048 * 2048 * 257 = 4,311,744,512 → uint32 = 16,777,216 (16 MB)
+    AllocationSize = 16 MB  (HeapArray, passes empty() check since 16MB ≠ 0)
+    Actual write  = 4.1 GB  into 16 MB → heap-buffer-overflow in GPU process
+
+  Prerequisites:
+    (a) ETC2 not natively supported: CheckETCFormatSupport = IsAtLeastGLES(3,0) = FALSE
+        In practice: old GLES2-only hardware, or special command-buffer context
+        that reports GLES2 without native ETC2 (e.g., WebGL1 context on GLES2 hw)
+    (b) Renderer code execution to bypass Blink's imageSize check
+        Blink validates imageSize client-side; compromised renderer bypasses this
+
+  Attack vector:
+    Renderer writes raw GLES2 command directly to the shared-memory ring buffer:
+    Offset 0: OP_CompressedTexImage3D (opcode 0x0175 or similar)
+    +4:  target   = 0x8C1A (GL_TEXTURE_2D_ARRAY)
+    +8:  level    = 0
+    +12: format   = 0x9274 (GL_COMPRESSED_RGB8_ETC2)
+    +16: width    = 2048, height = 2048, depth = 257
+    +28: border   = 0
+    +32: imageSize = 536870912
+    +36: data_shm_id / data_shm_offset → points to 512 MB shared memory
+
+
+END-TO-END CHAIN DESCRIPTION
+───────────────────────────────────────────────────────────────────────────
+
+Stage 0: Initial access
+  Source: Any origin with CORS or same-origin
+  Method: HTML page with WebGL2 + WebNN API access
+
+Stage 1 (prerequisite): Renderer process code execution
+  Required first: any renderer RCE vulnerability
+  Examples from recent history:
+    - libwebp heap overflow (CVE-2023-4863, Sept 2023) — image decode in renderer
+    - V8 OOB (CVE-2024-0519, Jan 2024) — JIT type confusion
+    - ArrayBuffer UAF (historical pattern)
+  With renderer RCE: attacker can write arbitrary data to GPU command ring buffer
+
+Stage 2: GPU process heap-buffer-overflow via Finding 1
+  Renderer writes crafted CompressedTexImage3D to command buffer ring
+  GPU process:
+    - DecompressTextureData allocates 16 MB (overflowed)
+    - SW ETC2 decompressor writes 4.1 GB → heap overflow in GPU process
+    - GPU process heap corruption → GPU process code execution
+
+Stage 3: Sandbox escape (GPU → system)
+  GPU process has access to /dev/dri, GPU hardware, shared memory
+  From GPU process: further OS-level exploitation or information extraction
+
+Total hops: JS → Renderer RCE (external) → GPU overflow (Finding 1) → GPU exec
+
+
+END-TO-END TEST: WHAT CAN BE DEMONSTRATED
+───────────────────────────────────────────────────────────────────────────
+
+Without a live renderer RCE, we can demonstrate:
+
+  Demo 1 — Attack surface validation:
+    GL_TEXTURE_2D_ARRAY + ETC2 passes format target check (confirmed live)
+    MAX_ARRAY_TEXTURE_LAYERS=2048 (depth=257 in range, confirmed live)
+    INVALID_VALUE for wrong imageSize on all paths (confirms imageSize
+    validation is the sole blocker from JS, not format or target)
+
+  Demo 2 — Overflow arithmetic proof:
+    4 * 2048 * 2048 * 257 mod 2^32 = 16,777,216
+    ETC2 compressed size for 2048x2048x257: ceil(512)*ceil(512)*257*8 = 536MB
+    All math confirmed in Chrome 150 JS environment
+
+  Demo 3 — GPU command buffer structure:
+    Write PoC that constructs the raw CompressedTexImage3D command bytes
+    Documented IPC structure showing exactly what a compromised renderer sends
+
+  Demo 4 — GLES2 context type determination:
+    Probe whether current context would invoke SW ETC2 decompression
+    (requires IsAtLeastGLES(3,0) = FALSE, i.e., GLES2 hardware path)
+
+
+SUMMARY
+───────────────────────────────────────────────────────────────────────────
+
+  Finding  | Status       | Access Level           | Renderer R/W Req.
+  ─────────────────────────────────────────────────────────────────────
+  1 (HIGH) | CONFIRMED    | GPU process (stage 2)  | YES — Stage 1 needed
+  2 (WebNN)| FALSE POSIT. | N/A (not exploitable)  | N/A
+  Renderer | NOT FOUND    | —                      | —
+  Blink    | Well-hardened| CheckedNumeric/span    | —
+
+  The renderer attack surface (Blink WebGL/Audio/Codecs/WebNN renderer-side)
+  is extremely well-hardened in Chrome 150. Renderer controlled R/W realistically
+  requires: V8 JIT bug (Class A), DOM UAF (Class B), or image-codec bug (Class D).
+  Finding 1's GPU process overflow remains the highest-impact finding in this
+  research and is exploitable as a second stage from any renderer-RCE bug.

