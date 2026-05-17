@@ -8,7 +8,34 @@ Method:  Live in-browser probe via WebNN Level-2 and WebGL2 APIs
 
 
 ════════════════════════════════════════════════════════════════
-FINDING 2 — FULLY VERIFIED (HIGH — Browser/Utility Process)
+FINDING 2 — RE-CLASSIFIED: FALSE POSITIVE (see renderer_rw_analysis.txt)
+graph_builder_tflite.cc:8031 — CORRECTION NOTICE (2026-05-17)
+════════════════════════════════════════════════════════════════
+
+CORRECTION: The analysis below is INCORRECT. Deep static analysis of the
+Chromium source shows that the multiplication at line 8031:
+
+  resized_dimensions[1] = block_size * input_dimensions[axis]
+
+where input_dimensions = blockwise_scale_shape (the SCALE tensor shape),
+not the input tensor shape. The product:
+
+  (input_shape[axis] / scale_shape[axis]) * scale_shape[axis]
+  = input_shape[axis]   (always fits in int32 per WebNN ValidateAndGetByteLength)
+
+For the test below (scale=[1,1,1,1,1]): scale_shape[index] == 1 for all
+axes, so the conditional in BlockwiseExpandScaleAndZeroPoint was never
+triggered — BlockwiseExpandAlongAxis was never called. The correct output
+([5.0,...]) reflects standard dequantize, not an overflow path.
+
+The build() "success" and dispatch() correct output both occurred on the
+standard (non-overflow) code path. Finding 2 status: FALSE POSITIVE.
+Full re-analysis in: security/xnnpack-conv2d-overflow/renderer_rw_analysis.txt
+
+────────────────────────────────────────────────────────────────
+ORIGINAL (INCORRECT) ANALYSIS PRESERVED BELOW FOR REFERENCE:
+════════════════════════════════════════════════════════════════
+FINDING 2 — ORIGINAL CLAIM (SUPERSEDED — FALSE POSITIVE)
 graph_builder_tflite.cc:8031 int32 overflow in BlockwiseExpandAlongAxis
 ════════════════════════════════════════════════════════════════
 
@@ -122,13 +149,15 @@ Both findings are confirmed by code-path analysis against chromium-src commit 2f
 VERIFICATION SUMMARY
 ════════════════════════════════════════════════════════════════
 
-Finding  Status      Evidence
+Finding  Status            Evidence
 ───────────────────────────────────────────────────────────────────────
-2 (HIGH) LIVE        build() + dispatch() executed silently on Chrome 150.
-                     Overflow value 131073 compiled into TFLite FlatBuffer.
-                     OOB occurs in TFLite arena during block-wise expand.
+2 (HIGH) FALSE POSITIVE   build() success on standard dequantize path.
+                          BlockwiseExpandAlongAxis never called (scale=1).
+                          Product always equals input_shape[axis] (in-range).
+                          See renderer_rw_analysis.txt for full re-analysis.
 
-1 (CRIT) CODE PATH   Integer overflow math confirmed (JS demo + source).
-         CONFIRMED   BPTC 3D textures reachable (GL baseline NO_ERROR).
-                     Blocked from JS by 2 GB imageSize constraint.
-                     Exploitable from compromised renderer process.
+1 (HIGH) CODE PATH        Integer overflow math confirmed (JS demo + source).
+         CONFIRMED        ETC2+TEXTURE_2D_ARRAY reachable (NO_ERROR confirmed).
+                          Blocked from JS by imageSize check.
+                          Exploitable from compromised renderer → GPU process.
+                          Full attack surface: f1_deep_verification.txt, e2e_stage2_poc.html.
