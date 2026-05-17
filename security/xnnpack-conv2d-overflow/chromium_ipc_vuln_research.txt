@@ -1,0 +1,186 @@
+Chromium IPC Boundary Vulnerability Research
+============================================
+Source:    chromium-src commit 2f8cc063 (main, 2026-05-17)
+Scope:     Web content → Browser/GPU/Network process attack surface
+Method:    Static analysis of Mojo IPC handler arithmetic + validation gaps
+
+
+════════════════════════════════════════════════════════════════
+FINDING 1 — CRITICAL (GPU PROCESS)
+Integer overflow in software texture decompression
+════════════════════════════════════════════════════════════════
+
+File:  gpu/command_buffer/service/gles2_cmd_decoder.cc
+Line:  12629-12630
+
+Vulnerable code:
+  uint32_t output_pixel_size = GLES2Util::ComputeImageGroupSize(
+      info.decompressed_format, info.decompressed_type);
+  auto decompressed_data = base::HeapArray<uint8_t>::Uninit(
+      output_pixel_size * width * height * depth);   // ← all uint32_t, wraps
+
+All four operands are uint32_t (or GLsizei cast to it).  Each multiplication
+is uint32_t×uint32_t with no overflow check.  The result wraps mod 2^32.
+That wrapped value is then widened to size_t for the HeapArray allocation.
+
+  if (decompressed_data.empty()) {     // ← only catches wrap-to-ZERO
+      MarkContextLost(error::kGuilty); // not all overflow values are zero
+      return base::HeapArray<>();
+  }
+  info.decompression_function(..., decompressed_data.data(), ...);  // WRITE
+
+Trigger path (WebGL):
+  glCompressedTexImage3D(target, level, compressed_format,
+                         width=2048, height=2048, depth=513, ...)
+  → ValidForTextureTarget passes  (GL_MAX_3D_TEXTURE_SIZE = 2048 ≥ 513)
+  → format has no hw support → DecompressTextureData called
+  → 4 * 2048 * 2048 * 513 = 8,606,711,808 → mod 2^32 = 16,777,216
+  → HeapArray of 16 MB allocated (not empty → passes check)
+  → decompression_function writes 8.6 GB into 16 MB buffer
+  → heap-buffer-overflow in GPU process
+
+Common overflow values for RGBA8 (pixel_size=4):
+  w=2048 h=2048 d=513  → alloc=16,777,216 B  written=8.6 GB  (GPU process crash)
+  w=2048 h=2048 d=1025 → alloc=16,777,216 B  written=17.2 GB
+  w=32769 h=32769 d=1  → alloc=262,148 B     written=4.3 GB  (needs max_dim≥32769)
+
+The GL_MAX_3D_TEXTURE_SIZE limit (typically 2048) is enforced before the call,
+so depth=513 passes on virtually all hardware.  The missing fix is a single
+base::CheckMul wrapper:
+  base::CheckedNumeric<size_t> alloc_size = output_pixel_size;
+  alloc_size *= width; alloc_size *= height; alloc_size *= depth;
+  if (!alloc_size.IsValid()) return base::HeapArray<>();
+
+
+════════════════════════════════════════════════════════════════
+FINDING 2 — HIGH (BROWSER/UTILITY PROCESS)
+Integer overflow produces undersized tensor in WebNN TFLite backend
+════════════════════════════════════════════════════════════════
+
+File:  services/webnn/tflite/graph_builder_tflite.cc
+Lines: 8031, 8045  (function BlockwiseExpandAlongAxis)
+
+Vulnerable code:
+  // block_size (uint32_t) = input_dim / scale_dim
+  // input_dimensions[axis] (int32_t) from validated OperandDescriptor
+  std::array<int32_t, 4> resized_dimensions = flattened_dimensions;
+  resized_dimensions[1] = block_size * input_dimensions[axis];  // OVERFLOW
+
+  ASSIGN_OR_RETURN(const TensorIndex resize_tensor_index,
+      SerializeTemporaryTensorWithByteSizeCheck(resized_dimensions, ...));
+  // Tensor created with wrapped (small) dimension, not the true large one.
+
+  output_dimensions[axis] = block_size * input_dimensions[axis];  // OVERFLOW again
+  ASSIGN_OR_RETURN(const TensorIndex output_tensor_index,
+      SerializeTemporaryTensorWithByteSizeCheck(output_dimensions, ...));
+
+Overflow condition:
+  block_size = 65537 (from input_dim=65537, scale_dim=1)
+  block_size * input_dim = 65537 * 65537 = 4,295,098,369
+  As uint32_t → mod 2^32 = 131,073 (positive, passes validation!)
+  SerializeTemporaryTensorWithByteSizeCheck accepts 131,073-element tensor.
+  Subsequent operations reference the tensor expecting 65537^2 = 4.3B elements.
+  Out-of-bounds reads when consuming the undersized tensor downstream.
+
+Trigger via WebNN API:
+  navigator.ml.createContext({deviceType:'cpu'})   // TFLite backend on Linux
+  builder.input(...)   // shape: [1, 1, 65537, 1, 1]
+  builder.constant(...)  // scale shape: [1, 1, 1, 1, 1]  (scale_dim=1 → block_size=65537)
+  builder.dequantizeLinear(input, scale, zeroPoint)
+  builder.build({...})  // triggers BlockwiseExpandAlongAxis
+
+OperandDescriptor validation passes: each dimension ≤ INT32_MAX, total ≤ INT32_MAX.
+The product block_size * input_dim overflows int32_t AFTER validation.
+
+Validation gap: graph_validation_utils.cc checks block_size = input_dim / scale_dim
+is an integer, but does NOT check that block_size * input_dim fits in int32_t.
+
+
+════════════════════════════════════════════════════════════════
+FINDING 3 — MEDIUM (BROWSER PROCESS, macOS)
+uint32_t overflow in CoreML batch normalization dimension flattening
+════════════════════════════════════════════════════════════════
+
+File:  services/webnn/coreml/graph_builder_coreml.cc
+Line:  2072
+
+Vulnerable code (rank-5 batch norm reshape):
+  std::array<uint32_t, 4> flattened_dims{
+      dimensions[0], dimensions[1], dimensions[2],
+      dimensions[3] * dimensions[4]};   // ← unchecked uint32_t multiply
+  GenerateInternalOperandInfo(mil_data_type, flattened_dims);
+
+OperandDescriptor validates that dimensions[0]*...*dimensions[4] ≤ INT32_MAX.
+However, the sub-product dimensions[3] * dimensions[4] is computed in isolation
+without overflow check.  For a valid 5D tensor [1,1,1,46340,46341]:
+  total = 46340 * 46341 = 2,147,480,540 ≤ INT32_MAX  → passes validation
+  sub-product dimensions[3] * dimensions[4] = 2,147,480,540 ≤ UINT32_MAX → ok
+
+The dangerous case requires exact large-but-fitting total product with two large
+trailing dimensions.  Currently bounded by the total-product check, but if that
+check were ever relaxed or the sub-product combined with a later multiply, the
+overflow becomes reachable.  Rated medium pending further analysis.
+
+
+════════════════════════════════════════════════════════════════
+FINDING 4 — MEDIUM (GPU PROCESS)
+Unchecked view_format_count multiplication in WebGPU AssociateMailbox
+════════════════════════════════════════════════════════════════
+
+File:  gpu/command_buffer/service/webgpu_decoder_impl.cc
+Lines: 2204-2207
+
+Vulnerable code:
+  uint32_t view_format_count = static_cast<uint32_t>(c.view_format_count);
+  ...
+  std::vector<wgpu::TextureFormat> view_formats(view_format_count);
+  UNSAFE_TODO(memcpy(view_formats.data(),
+                     const_cast<const uint32_t*>(packed_data),
+                     view_format_count * sizeof(wgpu::TextureFormat)));  // UNCHECKED
+
+view_format_count is renderer-controlled.  packed_entry_count is validated
+against kMailboxNumEntries + view_format_count using uint64_t arithmetic,
+preventing the count itself from being wrong.  However the memcpy size
+argument `view_format_count * sizeof(wgpu::TextureFormat)` uses uint32_t
+arithmetic (4-byte format, sizeof=4), so:
+  view_format_count = 2^30 → size = 2^32 → wraps to 0 → memcpy(dst, src, 0)
+  view_format_count = 2^30 + 1 → size = 4  (wrong: should copy more)
+
+Impact: At high counts, memcpy copies fewer bytes than allocated in the vector,
+leaving the view_formats partially uninitialized when passed to Dawn.
+
+
+════════════════════════════════════════════════════════════════
+FINDING 5 — LOW (NETWORK PROCESS)
+Unchecked header count multiplication in URLLoader
+════════════════════════════════════════════════════════════════
+
+File:  services/network/url_loader.cc
+Line:  2207
+
+  raw_request_headers_size_ = headers.headers().size() * 4;
+
+size_t * 4 without checked math.  Value is used for UMA metrics only,
+not for allocation or bounds checks.  Requires 2^62 headers to overflow
+64-bit size_t — not a realistic exploit vector.  Informational.
+
+
+════════════════════════════════════════════════════════════════
+ATTACK SURFACE SUMMARY
+════════════════════════════════════════════════════════════════
+
+Finding  Process     Trigger API          Root cause
+─────────────────────────────────────────────────────────────────────
+1        GPU         WebGL                 uint32 overflow in texture
+         (critical)  glCompressedTexImage3D decompression allocation
+2        Browser     WebNN (TFLite CPU)    int32 overflow in block-wise
+         (high)      dequantizeLinear      quantize expand path
+3        Browser     WebNN (CoreML, macOS) uint32 sub-product in
+         (medium)    batchNormalization    rank-5 reshape
+4        GPU         WebGPU                uint32 multiply in memcpy
+         (medium)    createTexture         size argument
+5        Network     HTTP requests         size_t overflow in header
+         (low)       fetch/XHR             count × 4 (metrics only)
+
+Recommended fix pattern for all: base::CheckMul / base::CheckedNumeric
+before any multiplication used in allocation sizes or buffer offsets.
