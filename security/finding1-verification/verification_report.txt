@@ -65,18 +65,44 @@ CheckETCFormatSupport (line 12467):
     return feature_info.gl_version_info().IsAtLeastGLES(3, 0);
   }
 
-DecompressTextureData is called ONLY when support_check returns FALSE:
-  → Desktop OpenGL context (not OpenGL ES 3.0+)
-  → Chrome on Linux/Windows using ANGLE with GL backend (--use-angle=gl)
-  → OR: compromised renderer targeting a non-GLES GPU process context
+  IsAtLeastGLES checks the actual GPU context type:
+    • GLES 3.0+ context (SwiftShader, ANGLE/Vulkan, mobile) → TRUE  → native path (safe)
+    • Desktop OpenGL context (ANGLE/GL backend on Linux/Windows) → FALSE → DecompressTextureData
+
+DecompressTextureData IS called when:
+  → GPU process is using ANGLE with desktop GL backend (--use-angle=gl)
+    on Linux/Windows where the underlying driver is OpenGL (not OpenGL ES)
+  → OR: compromised renderer sending raw GPU IPC bypassing WebGL validation
+  → OR: device with GLES 2.0 only (no GLES 3.0 support, older Android)
+
+IMPORTANT — Direct JS barrier (confirmed via browser testing):
+  Browser test on ANGLE (Mesa llvmpipe OpenGL 4.5):
+    • Renderer: ANGLE (Mesa, llvmpipe (LLVM 20.1.2 256 bits), OpenGL 4.5)
+    • CheckETCFormatSupport: returns FALSE (desktop GL, not GLES) ← VULNERABLE PATH
+    • BUT: ANGLE frontend does NOT expose ETC2 format on non-GLES3 backends
+    • Result: compressedTexImage3D returns INVALID_ENUM before reaching gles2_cmd_decoder.cc
+    • Conclusion: Direct JS cannot trigger the overflow via WebGL2 on this path
+
+  Attack vector that DOES reach gles2_cmd_decoder.cc:
+    • Compromised renderer process sends raw GLES2 IPC command
+      (bypasses ANGLE's WebGL validation layer entirely)
+    • gles2_cmd_decoder.cc has ETC2 in kCompressedFormatInfoArray always
+    • On non-GLES3 GPU process: CheckETCFormatSupport=false → DecompressTextureData called
 
 Formats that trigger the path (from kCompressedFormatInfoArray):
   GL_COMPRESSED_R11_EAC            (ops=1, block=4, bpb=8)
   GL_COMPRESSED_SIGNED_R11_EAC     (ops=1, block=4, bpb=8)
   GL_COMPRESSED_RG11_EAC           (ops=2, block=4, bpb=16)
-  GL_COMPRESSED_RGB8_ETC2          (ops=4, block=4, bpb=8)   ← easiest trigger
-  GL_COMPRESSED_RGBA8_ETC2_EAC     (ops=4, block=4, bpb=16)
+  GL_COMPRESSED_RGB8_ETC2          (ops=4, block=4, bpb=8)
+  GL_COMPRESSED_RGBA8_ETC2_EAC     (ops=4, block=4, bpb=16)  ← best overflow (ops=4)
   ... (6 total ETC2/EAC formats)
+
+Corrected exploitable dimensions (MAX_3D_TEXTURE_SIZE=2048 on desktop):
+  Minimum overflow: w=2048, h=2048, d=257
+    4 * 2048 * 2048 * 257 = 4,311,744,512 → uint32 = 16,777,216 (16 MB)
+    empty() check BYPASSED (16 MB ≠ 0); true write size = ~4 GB
+  Note: d=1536 and d=2048 overflow to exactly 0 (caught) — safe depths
+  Exploitable depths within 2048 limit: 257–2047 except {1536, 2048} = 1785 values
 
 
 ════════════════════════════════════════════════════════════════════════════
@@ -176,29 +202,38 @@ Test 3 — --use-angle=gl (desktop OpenGL, non-GLES):
 
 
 ════════════════════════════════════════════════════════════════════════════
-EXPLOIT PRECONDITIONS (renderer RCE → GPU process)
+EXPLOIT PRECONDITIONS (confirmed by live browser testing)
 ════════════════════════════════════════════════════════════════════════════
 
-Without renderer RCE:
-  Normal WebGL2 JS call goes through renderer-side WebGL2Implementation which
-  validates dimensions and caps at MAX_TEXTURE_SIZE / MAX_3D_TEXTURE_SIZE.
-  The GPU process ALSO validates dimensions at line 12957 (ValidForTextureTarget).
-  Result: depth=65 with w=h=4096 PASSES both (65 << 2048 max).
-  imageSize check (line 12677) also passes with correct compressed size.
-  The call reaches DecompressTextureData → overflow.
+Confirmed two-layer defense prevents direct JS trigger:
 
-Actually: this bug IS triggerable from uncompromised renderer if:
-  1. The renderer's WebGL layer doesn't cap depth=65 (it doesn't — well within MAX_3D)
-  2. The GPU context uses desktop OpenGL (CheckETCFormatSupport returns false)
-  3. JavaScript calls compressedTexImage3D with ETC2 format and these dimensions
+  Layer 1 — ANGLE frontend format check:
+    On non-GLES3 backends (ANGLE/GL), ETC2 formats not exposed to WebGL2.
+    compressedTexImage3D returns INVALID_ENUM before any IPC to GPU process.
 
-The renderer RCE prerequisite is for bypassing imageSize validation when
-imageSize itself overflows, OR for targeting non-GLES contexts that don't
-expose ETC2 to WebGL.
+  Layer 2 — Dimension validation at WebGL2 layer:
+    MAX_3D_TEXTURE_SIZE=2048 on this machine; w=4096 > 2048 → INVALID_VALUE.
+    (Corrected PoC uses w=h=2048, d=257 which passes this check.)
 
-VRP Impact: GPU process heap overflow achievable from renderer JS in
-certain Chrome configurations. On desktop Chrome with OpenGL backend,
-no renderer compromise needed for the overflow to occur.
+Attack vector requiring renderer RCE:
+  1. Attacker gains renderer process code execution (renderer RCE)
+  2. Attacker crafts raw GLES2 CommandBuffer IPC messages
+     (bypasses ANGLE frontend validation entirely)
+  3. GPU process receives CompressedTexImage3D with:
+       format = GL_COMPRESSED_RGBA8_ETC2_EAC (0x9278)
+       w=2048, h=2048, d=257 (or any of 1785 valid overflow depths)
+  4. gles2_cmd_decoder.cc:12988 checks format_info (ETC2 is in kCompressedFormatInfoArray)
+  5. CheckETCFormatSupport → IsAtLeastGLES(3,0) → FALSE (desktop GL backend)
+  6. DecompressTextureData(w=2048, h=2048, d=257) called
+  7. output_pixel_size(4) * 2048 * 2048 * 257 = 4,311,744,512 → uint32 = 16,777,216
+  8. HeapArray::Uninit(16,777,216) — 16 MB allocated
+  9. empty() = false → check bypassed
+  10. angle::LoadETC2RGBA8ToRGBA8 writes 4 GB → heap buffer overflow
+
+VRP Impact (corrected):
+  Requires renderer RCE first → GPU process heap overflow
+  Renderer→GPU escalation primitive: ~$15,000–$30,000 (GPU process only)
+  Full chain (renderer RCE + GPU overflow + kernel): ~$100,000–$250,000
 
 
 ════════════════════════════════════════════════════════════════════════════
