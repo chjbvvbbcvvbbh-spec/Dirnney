@@ -375,3 +375,4 @@ test:.cs
 *.testStats.csv
 security/finding1-verification/overflow_proof
 security/finding1-verification/asan_reproducer
+security/finding1-verification/real_asan_reproducer
