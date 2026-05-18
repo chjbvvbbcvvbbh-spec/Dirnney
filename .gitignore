@@ -374,3 +374,4 @@ test:.cs
 *.testResults.xml
 *.testStats.csv
 security/finding1-verification/overflow_proof
+security/finding1-verification/asan_reproducer
