@@ -373,3 +373,4 @@ test:.cs
 *.tempLog.xml
 *.testResults.xml
 *.testStats.csv
+security/finding1-verification/overflow_proof
